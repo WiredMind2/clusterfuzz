@@ -84,6 +84,10 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/scripts/llm_crash_triage.py` | Ollama triage → `triage.md` | **Present** |
 | `deploy/scripts/llm_fuzz_enqueue.py` | Queue deep-fuzz job after PR run | **Present** |
 | `deploy/scripts/llm_fuzz_worker.py` | Background deep fuzz + follow-up comments | **Present** |
+| `deploy/scripts/cf_enable_repo.sh` | One-command multi-repo enable + enablement PR | **Present** |
+| `deploy/scripts/llm_scaffold_harness.py` | LLM/static harness scaffold for enable | **Present** |
+| `.github/workflows/fuzz-pr-reusable.yml` | Reusable timed-fuzz job | **Present** |
+| `.github/workflows/fuzz-dispatch.yml` | Central repository_dispatch entry | **Present** |
 | `deploy/docker-compose.llm-worker.yml` | Optional `llm-fuzz-worker` service | **Present** |
 
 ## GitHub workflow template
