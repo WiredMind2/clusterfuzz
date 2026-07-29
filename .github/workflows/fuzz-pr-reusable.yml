@@ -75,11 +75,18 @@ jobs:
 
     steps:
       - name: Checkout
+        if: env.CROSS_REPO != '1'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+
+      - name: Checkout cross-repo
+        if: env.CROSS_REPO == '1'
         uses: actions/checkout@v4
         with:
           repository: ${{ env.TARGET_REPOSITORY }}
-          ref: ${{ inputs.checkout_ref || github.sha }}
-          token: ${{ secrets.CROSS_REPO_TOKEN || github.token }}
+          ref: ${{ inputs.checkout_ref }}
+          token: ${{ secrets.CROSS_REPO_TOKEN }}
 
       - name: Locate ClusterFuzz deploy glue
         id: glue
