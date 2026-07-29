@@ -251,8 +251,9 @@ jobs:
           python3 "${DEPLOY}/scripts/llm_crash_triage.py" || true
 
       - name: Post PR review comments
+        if: env.CROSS_REPO != '1'
         env:
-          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ env.TARGET_REPOSITORY }}
           PR_NUMBER: ${{ env.PR_NUMBER }}
           ARTIFACT_DIR: ${{ env.ARTIFACT_DIR }}
@@ -264,6 +265,28 @@ jobs:
           if [[ -z "${PR_NUMBER}" || "${PR_NUMBER}" == "null" ]]; then
             echo "==> skip comments (no PR number)"
             exit 0
+          fi
+          python3 "${DEPLOY}/scripts/post_pr_comments.py"
+
+      - name: Post PR review comments (cross-repo)
+        if: env.CROSS_REPO == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          GITHUB_REPOSITORY: ${{ env.TARGET_REPOSITORY }}
+          PR_NUMBER: ${{ env.PR_NUMBER }}
+          ARTIFACT_DIR: ${{ env.ARTIFACT_DIR }}
+          CLUSTERFUZZ_UI_URL: ${{ env.CLUSTERFUZZ_UI_URL }}
+          FUZZ_ENGINE: ${{ env.FUZZ_ENGINE }}
+        run: |
+          set -euo pipefail
+          DEPLOY="${{ steps.glue.outputs.deploy }}"
+          if [[ -z "${PR_NUMBER}" || "${PR_NUMBER}" == "null" ]]; then
+            echo "==> skip comments (no PR number)"
+            exit 0
+          fi
+          if [[ -z "${GITHUB_TOKEN}" ]]; then
+            echo "error: CROSS_REPO_TOKEN secret required for cross-repo comments" >&2
+            exit 1
           fi
           python3 "${DEPLOY}/scripts/post_pr_comments.py"
 

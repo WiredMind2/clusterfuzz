@@ -198,7 +198,7 @@ fi
 
 log "Configuring secrets/vars on ${REPO}"
 # Dispatch token: farm uses same PAT so target Actions can repository_dispatch.
-printf '%s' "${TOKEN}" | gh secret set CLUSTERFUZZ_DISPATCH_TOKEN --repo "${REPO}" --body -
+gh secret set CLUSTERFUZZ_DISPATCH_TOKEN --repo "${REPO}" --body "${TOKEN}"
 
 gh variable set FUZZ_ENGINE --repo "${REPO}" --body "${ENGINE}"
 gh variable set FUZZ_SECONDS --repo "${REPO}" --body "60"
@@ -209,7 +209,7 @@ gh variable set LLM_FUZZ_BG_ENABLED --repo "${REPO}" --body "1"
 gh variable set SKIP_INGEST --repo "${REPO}" --body "${SKIP_INGEST}"
 
 log "Ensuring cross-repo token on ${FARM_REPO}"
-printf '%s' "${TOKEN}" | gh secret set CLUSTERFUZZ_CROSS_REPO_TOKEN --repo "${FARM_REPO}" --body -
+gh secret set CLUSTERFUZZ_CROSS_REPO_TOKEN --repo "${FARM_REPO}" --body "${TOKEN}"
 
 log "Pushing enablement branch"
 git push -u origin "HEAD:${BRANCH}" --force-with-lease
