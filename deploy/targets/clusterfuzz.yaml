@@ -4,9 +4,10 @@ github: WiredMind2/clusterfuzz
 engine: libfuzzer
 fuzz_seconds: 60
 ui_url: http://127.0.0.1:9300
-notes: Uses deploy/demo-target; PR workflow in .github/workflows/fuzz-pr.yml
+notes: Uses deploy/demo-target; App webhook path only (no thin fuzz-pr.yml — avoids github-actions[bot] duplicate)
 llm:
   enabled: true
+  provider: ollama
   model: Qwen2.5-Coder:1.5b
   base_url: http://127.0.0.1:11434
   background: true

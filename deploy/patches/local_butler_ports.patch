@@ -1,6 +1,20 @@
---- a/src/local/butler/constants.py
-+++ b/src/local/butler/constants.py
+diff -Naur a/local/emulators/gcs.go b/local/emulators/gcs.go
+--- a/local/emulators/gcs.go	2026-07-29 20:07:16.807879550 +0200
++++ b/local/emulators/gcs.go	2026-07-29 20:07:16.817879582 +0200
+@@ -249,7 +249,7 @@
+ }
+ 
+ func main() {
+-	flag.IntVar(&port, "port", 9008, "Port to listen on.")
++	flag.IntVar(&port, "port", 9308, "Port to listen on.")
+ 	flag.StringVar(&storagePath, "storage-path", "", "Local GCS storage path.")
+ 	flag.Parse()
+ 
+diff -Naur a/src/local/butler/constants.py b/src/local/butler/constants.py
+--- a/src/local/butler/constants.py	2026-07-29 20:07:16.800879529 +0200
++++ b/src/local/butler/constants.py	2026-07-29 20:07:16.814879572 +0200
 @@ -64,19 +64,19 @@
+ TEST_APP_ID = 'test-clusterfuzz'
  TEST_APP_ID_WITH_DEV_PREFIX = 'dev~' + TEST_APP_ID
  
 -DEV_APPSERVER_PORT = 9000
@@ -25,22 +39,27 @@
 -LOCAL_GCS_SERVER_PORT = 9008
 +LOCAL_GCS_SERVER_PORT = 9308
  LOCAL_GCS_SERVER_HOST = 'http://localhost:' + str(LOCAL_GCS_SERVER_PORT)
---- a/src/local/butler/scripts/upload_fuzzer.py
-+++ b/src/local/butler/scripts/upload_fuzzer.py
-@@ -23,7 +23,7 @@
--_FUZZERS_ENDPOINT = 'http://localhost:9000/fuzzers'
-+_FUZZERS_ENDPOINT = 'http://localhost:9300/fuzzers'
---- a/local/emulators/gcs.go
-+++ b/local/emulators/gcs.go
-@@ -249,7 +249,7 @@
--	flag.IntVar(&port, "port", 9008, "Port to listen on.")
-+	flag.IntVar(&port, "port", 9308, "Port to listen on.")
---- a/src/local/butler/run_server.py
-+++ b/src/local/butler/run_server.py
-@@ -160,7 +160,8 @@
+diff -Naur a/src/local/butler/run_server.py b/src/local/butler/run_server.py
+--- a/src/local/butler/run_server.py	2026-07-29 20:07:16.811879563 +0200
++++ b/src/local/butler/run_server.py	2026-07-29 20:07:16.831879625 +0200
+@@ -159,7 +159,7 @@
+ 
+   # Start our custom GCS emulator.
    local_gcs = common.execute_async(
 -      'go run emulators/gcs.go -storage-path=' + os.path.join(
-+      'go run emulators/gcs.go -port=' + str(constants.LOCAL_GCS_SERVER_PORT) +
-+      ' -storage-path=' + os.path.join(
++      'go run emulators/gcs.go -port=' + str(constants.LOCAL_GCS_SERVER_PORT) + ' -storage-path=' + os.path.join(
            os.path.abspath(args.storage_path), 'local_gcs'),
        cwd='local')
+ 
+diff -Naur a/src/local/butler/scripts/upload_fuzzer.py b/src/local/butler/scripts/upload_fuzzer.py
+--- a/src/local/butler/scripts/upload_fuzzer.py	2026-07-29 20:07:16.804879541 +0200
++++ b/src/local/butler/scripts/upload_fuzzer.py	2026-07-29 20:07:16.816879578 +0200
+@@ -23,7 +23,7 @@
+ from appengine.libs import gcs
+ from clusterfuzz._internal.datastore import data_types
+ 
+-_FUZZERS_ENDPOINT = 'http://localhost:9000/fuzzers'
++_FUZZERS_ENDPOINT = 'http://localhost:9300/fuzzers'
+ 
+ 
+ def _upload_fuzzer_archive(upload_info: gcs.GcsUpload,

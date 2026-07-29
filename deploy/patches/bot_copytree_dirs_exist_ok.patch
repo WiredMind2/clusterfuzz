@@ -1,0 +1,9 @@
+diff -Naur c/src/local/butler/common.py d/src/local/butler/common.py
+--- c/src/local/butler/common.py	2026-07-29 20:07:16.838879647 +0200
++++ d/src/local/butler/common.py	2026-07-29 20:07:16.840879653 +0200
+@@ -458,4 +458,4 @@
+ def update_dir(src_dir, dst_dir):
+   """Recursively copy from src_dir to dst_dir, replacing files but only if
+   they're newer or don't exist."""
+-  shutil.copytree(src_dir, dst_dir, copy_function=copy_if_newer)
++  shutil.copytree(src_dir, dst_dir, copy_function=copy_if_newer, dirs_exist_ok=True)

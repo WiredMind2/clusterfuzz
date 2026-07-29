@@ -16,11 +16,12 @@ services:
     container_name: clusterfuzz-gha-runner
     restart: unless-stopped
     # Host network so jobs can reach loopback services (Ollama :11434, OTLP :4318).
+    # Outbound OpenRouter also works with host networking.
     network_mode: host
     env_file:
       - runner.env
     environment:
-      # Labels must include clusterfuzz-local for fuzz-pr.yml
+      # Labels must include clusterfuzz-local for fuzz-pr-reusable.yml
       LABELS: ${LABELS:-self-hosted,linux,clusterfuzz-local}
       RUNNER_NAME: ${RUNNER_NAME:-clusterfuzz-local-runner}
       RUNNER_WORKDIR: /tmp/runner/work

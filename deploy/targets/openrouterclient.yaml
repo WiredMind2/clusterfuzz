@@ -6,9 +6,10 @@ fuzz_seconds: 60
 harnesses:
   - fuzz/scaffold_fuzzer.py
 ui_url: http://127.0.0.1:9300
-notes: Enabled via central repository_dispatch to WiredMind2/clusterfuzz
+notes: App-only PR path (thin fuzz-pr.yml removed; cutover 2026-07-29)
 llm:
   enabled: true
+  provider: ollama
   model: Qwen2.5-Coder:1.5b
   base_url: http://127.0.0.1:11434
   background: true

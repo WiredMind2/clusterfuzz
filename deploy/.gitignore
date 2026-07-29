@@ -3,8 +3,5 @@ runner.env
 runner.env.tmp
 llm-worker.env
 github-app.env
-cloudflared.env
 github-app/private-key.pem
 github-app/*.pem
-github-app/credentials.json
-github-app/cloudflared-config.yml

@@ -7,7 +7,7 @@ Status legend:
 - **Present** — exists in the workspace / verified running as of the last refresh
 - **Optional / not started** — present as files but not running (needs secrets or operator action)
 
-> Last refresh: after all three build phases. Continuous farm is **up** (`cf-server` healthy, `cf-bot` running). UI answers HTTP 200 on `http://127.0.0.1:9300/`. See also `deploy/BOOTSTRAP_STATUS.md`.
+> Last refresh: 2026-07-29. Continuous farm is **up** (`cf-server` healthy, `cf-bot` running). GitHub App, host tunnel, `gha-runner`, and `llm-fuzz-worker` are **running**. UI answers HTTP 200 on `http://127.0.0.1:9300/`. See also `deploy/BOOTSTRAP_STATUS.md`.
 
 ## Top-level layout
 
@@ -15,7 +15,7 @@ Status legend:
 | --- | --- | --- |
 | `upstream/` | Official `google/clusterfuzz` checkout | **Present** — tag **v2.35.0** |
 | `deploy/` | Compose, Dockerfiles, scripts, demo, workflows, docs | **Present** |
-| `data/` | Shared host storage: `local_gcs/`, `bot/`, `runner/`, `env.yaml`, `WEB-INF/` | **Present** (populated by bootstrap) |
+| `data/` | Shared host storage: `local_gcs/`, `bot/`, `runner/`, `github_app_*`, `llm_fuzz_queue/`, `env.yaml`, `WEB-INF/` | **Present** (populated by bootstrap) |
 | `deploy/data` | Symlink → `../data` (so runner/ingest paths under `deploy/` resolve) | **Present** |
 
 ## Official upstream
@@ -36,26 +36,31 @@ Status legend:
 | `deploy/Dockerfile.bot` | Builds `clusterfuzz-bot:local` (FROM server image) | **Present** |
 | `deploy/Dockerfile.runner` | Builds `clusterfuzz-gha-runner:local` | **Present** |
 | `deploy/Dockerfile.github-app` | Builds `clusterfuzz-github-app:local` | **Present** |
-| `deploy/docker-compose.runner.yml` | **Override** for `gha-runner` (not in main compose by default) | **Present** |
-| `deploy/docker-compose.github-app.yml` | **Override** for `cf-github-app` + `cloudflared` | **Present** |
+| `deploy/Dockerfile.llm-worker` | Builds `clusterfuzz-llm-worker:local` (no apt on start) | **Present** |
+| `deploy/docker-compose.runner.yml` | **Override** for `gha-runner` | **Present** |
+| `deploy/docker-compose.github-app.yml` | **Override** for `cf-github-app` only (host cloudflared; no Compose tunnel) | **Present** |
+| `deploy/docker-compose.llm-worker.yml` | **Override** for `llm-fuzz-worker` | **Present** |
 | `deploy/runner.env.example` | Template for `REPO_URL` / tokens / labels | **Present** |
 | `deploy/github-app.env.example` | App ID, webhook secret, key path | **Present** |
-| `deploy/cloudflared.env.example` | `TUNNEL_TOKEN` for fuzzing.tetrazero.com | **Present** |
-| `deploy/GITHUB_RUNNER.md` | Runner registration how-to | **Present** |
-| `deploy/docs/github-app.md` | Sourcery-style App + tunnel setup | **Present** |
+| `deploy/patches/local_butler_ports.patch` | Port remap 900x→930x (verify/docs; applied by `apply_local_ports.sh`) | **Present** |
+| `deploy/patches/bot_copytree_dirs_exist_ok.patch` | Bot restart `copytree`/`dirs_exist_ok` fix | **Present** |
+| `deploy/GITHUB_RUNNER.md` | Runner registration how-to (Actions fallback) | **Present** |
+| `deploy/docs/github-app.md` | Sourcery-style App + host cloudflared setup | **Present** |
 | `deploy/BOOTSTRAP_STATUS.md` | Bootstrap result, port conflict note, verified checks | **Present** |
+| `deploy/tests/test_glue.py` | Glue unit tests | **Present** |
 
 **Compose services (runtime):**
 
 | Service | Intent | Status |
 | --- | --- | --- |
 | `cf-server` | Local UI on host `127.0.0.1:9300` (+ `9308` GCS emulator); shared `/data` | **Running** (healthy) |
-| `cf-bot` | `run_bot` with `--server-storage-path /data` (via image/entrypoint); host network | **Running** |
-| `cf-github-app` | Webhooks on `127.0.0.1:9310`; timed PR fuzz; App comments | **Optional / not started** (needs App + secrets) |
-| `cloudflared` | `fuzzing.tetrazero.com` → `:9310` | **Optional / not started** (needs `TUNNEL_TOKEN`) |
-| `gha-runner` | Labels `self-hosted`, `linux`, `clusterfuzz-local`; start via runner override + `runner.env` | **Optional / not started** (needs secrets) |
+| `cf-bot` | `run_bot` with `--server-storage-path /data`; host network | **Running** |
+| `cf-github-app` | Webhooks on `127.0.0.1:9310`; timed PR fuzz; App comments | **Running** (healthy) |
+| Host `cloudflared` | `fuzzing.tetrazero.com` → `:9310` (TetrazeroDashboard) | **Running** |
+| `gha-runner` | Labels `self-hosted`, `linux`, `clusterfuzz-local`; Actions **fallback** | **Running** |
+| `llm-fuzz-worker` | Background deep fuzz + follow-up comments | **Running** |
 
-Images in use: `clusterfuzz-server:local`, `clusterfuzz-bot:local`.
+Images in use: `clusterfuzz-server:local`, `clusterfuzz-bot:local`, `clusterfuzz-github-app:local`, `clusterfuzz-gha-runner:local`, `clusterfuzz-llm-worker:local`.
 
 No Firebase, App Engine, real GCS, or service-account JSON.
 
@@ -66,7 +71,9 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/scripts/bootstrap.sh` | Build images, `run_server --bootstrap`, start stack, write `BOOTSTRAP_STATUS.md` | **Present** (already run successfully) |
 | `data/local_gcs/` | Filesystem GCS (`test-*-bucket`, …) | **Present** |
 | `data/bot/clusterfuzz/bot/logs/bot.log` | Bot log | **Present** |
-| `data/runner/` | Actions runner registration dir (created by bootstrap) | **Present** (empty until runner registers) |
+| `data/runner/` | Actions runner registration dir | **Present** (registered) |
+| `data/github_app_queue/` | App job queue | **Present** |
+| `data/llm_fuzz_queue/` | LLM background job queue | **Present** |
 | `deploy/data` → `../data` | Symlink for compose.runner / ingest defaults | **Present** |
 
 ## Demo fuzz target
@@ -76,7 +83,7 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/demo-target/demo_fuzz.cc` | Tiny C++ buffer-overflow libFuzzer target | **Present** |
 | `deploy/demo-target/build.sh` | Build → revisioned zip under `out/` | **Present** |
 | `deploy/demo-target/Dockerfile` | Optional containerized demo build | **Present** |
-| `deploy/demo-target/out/` | Built `demo-fuzz`, `demo-fuzz-*.zip`, seed corpus | **Present** |
+| `deploy/demo-target/out/` | Built artifacts (gitignored; rebuild via `./build.sh`) | Rebuild on demand |
 
 ## Scripts
 
@@ -90,25 +97,34 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/scripts/github_app_server.py` | GitHub App webhooks + job queue worker | **Present** |
 | `deploy/scripts/github_app_auth.py` | App JWT + installation tokens | **Present** |
 | `deploy/scripts/run_pr_fuzz_job.sh` | App-path timed fuzz (mirrors reusable workflow) | **Present** |
+| `deploy/scripts/pr_fuzz_delta.py` | Diff-aware skip when PR has no fuzzable paths | **Present** |
+| `deploy/scripts/asan_helpers.py` | ASan SUMMARY/frame parse + demo BOOM helpers | **Present** |
+| `deploy/scripts/load_target_config.py` | Load `deploy/targets/<id>.yaml` for App/Actions jobs | **Present** |
+| `deploy/scripts/cf_farm_health.sh` | Probe UI / App / tunnel / queues | **Present** |
+| `deploy/scripts/verify_patches.sh` | Dry-run ports + bot `copytree` patches vs upstream pin | **Present** |
 | `deploy/github-app/deny-repos.txt` | Farm-side mute list | **Present** |
 | `deploy/github-app/app-manifest.yml` | App registration helper | **Present** |
-| `deploy/scripts/llm_fuzz_prepare.py` | Ollama seeds + libFuzzer dict (fail-open) | **Present** |
-| `deploy/scripts/llm_crash_triage.py` | Ollama triage → `triage.md` | **Present** |
+| `deploy/scripts/llm_chat.py` | Shared Ollama / OpenRouter chat client | **Present** |
+| `deploy/scripts/llm_fuzz_prepare.py` | LLM seeds + libFuzzer dict (fail-open) | **Present** |
+| `deploy/scripts/llm_crash_triage.py` | LLM triage → `triage.md` | **Present** |
 | `deploy/scripts/llm_fuzz_enqueue.py` | Queue deep-fuzz job after PR run | **Present** |
 | `deploy/scripts/llm_fuzz_worker.py` | Background deep fuzz + follow-up comments | **Present** |
-| `deploy/scripts/cf_enable_repo.sh` | One-command multi-repo enable + enablement PR | **Present** |
+| `deploy/scripts/cf_enable_repo.sh` | App-first multi-repo enable + optional Actions fallback | **Present** |
 | `deploy/scripts/llm_scaffold_harness.py` | LLM/static harness scaffold for enable | **Present** |
-| `.github/workflows/fuzz-pr-reusable.yml` | Reusable timed-fuzz job | **Present** |
-| `.github/workflows/fuzz-dispatch.yml` | Central repository_dispatch entry | **Present** |
 | `deploy/docker-compose.llm-worker.yml` | Optional `llm-fuzz-worker` service | **Present** |
+| `deploy/targets/*.yaml` | Per-repo farm registry (`clusterfuzz`, pilots, `_example`) | **Present** |
 
-## GitHub workflow template
+## GitHub workflow templates (Actions fallback)
 
 | Path | Role | Status |
 | --- | --- | --- |
-| `deploy/workflows/fuzz-pr.yml` | Template: self-hosted build → timed fuzz → ingest → comments | **Present** |
+| `deploy/workflows/fuzz-pr-caller.yml.template` | Thin `repository_dispatch` caller (`cf_enable_repo.sh --with-actions`) | **Present** |
+| `deploy/workflows/fuzz-pr-org-caller.yml.template` | Org-runner caller (future org path) | **Present** |
+| `.github/workflows/fuzz-pr-reusable.yml` | Farm reusable timed-fuzz job | **Present** |
+| `.github/workflows/fuzz-dispatch.yml` | Central `repository_dispatch` entry | **Present** |
+| `.github/workflows/glue-ci.yml` | Glue unit tests + patch dry-run | **Present** |
 
-Copy into target repos as `.github/workflows/fuzz-pr.yml`. Default build step uses the bundled demo target.
+Preferred path needs **no** thin workflow once the GitHub App is installed. Use `--with-actions` on `cf_enable_repo.sh` only for the Actions fallback. Farm same-repo `fuzz-pr.yml` is removed (App-only).
 
 ## Documentation
 
@@ -125,13 +141,14 @@ Copy into target repos as `.github/workflows/fuzz-pr.yml`. Default build step us
 | Deployment mode | Local butler only (no GCP) |
 | Host deps | Docker + Compose |
 | Upstream pin | **v2.35.0** |
-| Networking | **`network_mode: host`** for `cf-server` / `cf-bot` (local emulators on localhost) |
+| Networking | **`network_mode: host`** for farm services |
 | UI | `http://127.0.0.1:9300/` (binds host loopback) |
 | Aux port | `127.0.0.1:9308` (local GCS emulator) |
+| App webhooks | `127.0.0.1:9310` behind host `fuzzing.tetrazero.com` |
 | Storage | Repo-root `data/` ↔ container `/data` (`/data/local_gcs`) |
 | Symlink | `deploy/data` → `../data` |
-| Runner | Override file `docker-compose.runner.yml` + `runner.env` |
-| PR comment path | `run_timed_fuzz.sh` + `post_pr_comments.py` |
+| Preferred PR path | GitHub App + `run_pr_fuzz_job.sh` + `post_pr_comments.py` |
+| Actions fallback | `gha-runner` + thin dispatch callers |
 | Continuous farm | `cf-server` + `cf-bot` + shared `data/local_gcs` — **running** |
 
 ## Known host conflict (bootstrap)
@@ -144,4 +161,4 @@ Host **`:9000`** is reserved for Tetrazero. This deploy remaps ClusterFuzz local
 - Native ClusterFuzz GitHub / PR integration
 - BigQuery / Stackdriver crash-stats dashboards
 - Windows / macOS bots
-- Registered / running `gha-runner` (files ready; needs `runner.env` secrets)
+- Org-wide runner groups / multi-host farm

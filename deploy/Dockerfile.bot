@@ -6,10 +6,14 @@ FROM ${SERVER_IMAGE}
 ENV BOT_NAME=cf-bot
 
 # Upstream update_dir() uses shutil.copytree without dirs_exist_ok, so bot
-# container restarts fail once /data/bot is populated. Allow re-copy on restart.
-RUN sed -i \
-  's/shutil\.copytree(src_dir, dst_dir, copy_function=copy_if_newer)/shutil.copytree(src_dir, dst_dir, copy_function=copy_if_newer, dirs_exist_ok=True)/' \
-  /clusterfuzz/src/local/butler/common.py
+# container restarts fail once /data/bot is populated. Formal patch + sed fallback.
+COPY deploy/patches/bot_copytree_dirs_exist_ok.patch /tmp/bot_copytree_dirs_exist_ok.patch
+RUN patch -p1 -d /clusterfuzz < /tmp/bot_copytree_dirs_exist_ok.patch \
+    || sed -i \
+      's/shutil\.copytree(src_dir, dst_dir, copy_function=copy_if_newer)/shutil.copytree(src_dir, dst_dir, copy_function=copy_if_newer, dirs_exist_ok=True)/' \
+      /clusterfuzz/src/local/butler/common.py \
+    && rm -f /tmp/bot_copytree_dirs_exist_ok.patch \
+    && grep -q 'dirs_exist_ok=True' /clusterfuzz/src/local/butler/common.py
 
 CMD ["pipenv", "run", "python", "butler.py", "run_bot", \
      "--name", "cf-bot", \

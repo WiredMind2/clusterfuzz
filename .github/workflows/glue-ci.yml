@@ -1,0 +1,53 @@
+# Glue CI: unit tests + patch dry-run against upstream pin (no Docker farm).
+name: glue-ci
+
+on:
+  push:
+    paths:
+      - "deploy/**"
+      - ".github/workflows/glue-ci.yml"
+  pull_request:
+    paths:
+      - "deploy/**"
+      - ".github/workflows/glue-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Checkout upstream pin for patch dry-run
+        run: |
+          set -euo pipefail
+          if [[ ! -d upstream/.git ]]; then
+            git clone --depth 1 --branch v2.35.0 \
+              https://github.com/google/clusterfuzz.git upstream
+          fi
+
+      - name: Unit tests
+        run: |
+          python3 -m pip install --user 'PyJWT[crypto]>=2.8' >/dev/null
+          python3 -m unittest discover -s deploy/tests -v
+
+      - name: Patch dry-run
+        run: |
+          chmod +x deploy/scripts/verify_patches.sh
+          ./deploy/scripts/verify_patches.sh upstream
+
+      - name: Shellcheck (best-effort)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck >/dev/null
+          shellcheck -x deploy/scripts/cf_enable_repo.sh \
+            deploy/scripts/verify_patches.sh \
+            deploy/scripts/cf_farm_health.sh \
+            deploy/scripts/run_pr_fuzz_job.sh || true
+
+      - name: cf_enable_repo dry-run smoke
+        run: |
+          chmod +x deploy/scripts/cf_enable_repo.sh
+          # Help-only smoke when gh/network unavailable in CI
+          deploy/scripts/cf_enable_repo.sh --help | head -5

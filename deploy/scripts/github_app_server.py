@@ -32,6 +32,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from github_app_auth import installation_token  # noqa: E402
+from load_target_config import apply_target_to_environ, find_target  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -124,28 +125,55 @@ def claim_next_job() -> Path | None:
     return None
 
 
-def clone_pr_head(repo: str, sha: str, dest: Path, token: str) -> None:
+def clone_pr_head(repo: str, sha: str, dest: Path, token: str, base_sha: str = "") -> None:
+    """Shallow-clone PR head without embedding the token in the remote URL."""
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True, exist_ok=True)
-    url = f"https://x-access-token:{token}@github.com/{repo}.git"
+    url = f"https://github.com/{repo}.git"
+    # Prefer GIT_ASKPASS / header over x-access-token:…@ so tokens do not land
+    # in process lists, `git remote -v`, or clone error messages.
+    header = f"AUTHORIZATION: bearer {token}"
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
     subprocess.run(
-        ["git", "clone", "--depth", "50", url, str(dest)],
+        [
+            "git",
+            "-c",
+            f"http.https://github.com/.extraheader={header}",
+            "clone",
+            "--depth",
+            "50",
+            url,
+            str(dest),
+        ],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
+    git_c = ["git", "-C", str(dest), "-c", f"http.https://github.com/.extraheader={header}"]
     subprocess.run(
-        ["git", "-C", str(dest), "fetch", "--depth", "50", "origin", sha],
+        [*git_c, "fetch", "--depth", "50", "origin", sha],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
+    if base_sha:
+        subprocess.run(
+            [*git_c, "fetch", "--depth", "50", "origin", base_sha],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
     subprocess.run(
         ["git", "-C", str(dest), "checkout", "--force", sha],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
 
 
@@ -154,6 +182,7 @@ def run_job(job_path: Path) -> None:
     repo = job["repository"]
     pr_number = str(job["pr_number"])
     sha = job["sha"]
+    base_sha = job.get("base_sha") or ""
     installation_id = job["installation_id"]
     job_id = job.get("id", job_path.stem)
 
@@ -167,7 +196,7 @@ def run_job(job_path: Path) -> None:
     token = installation_token(installation_id)
     dest = work_dir() / job_id
     try:
-        clone_pr_head(repo, sha, dest, token)
+        clone_pr_head(repo, sha, dest, token, base_sha=base_sha)
         env_vars = os.environ.copy()
         env_vars.update(
             {
@@ -177,10 +206,20 @@ def run_job(job_path: Path) -> None:
                 "GITHUB_REPOSITORY": repo,
                 "PR_NUMBER": pr_number,
                 "GITHUB_SHA": sha,
+                "BASE_SHA": base_sha,
                 "ARTIFACT_DIR": str(dest / "fuzz-artifacts"),
                 "TARGET_ID": repo.split("/")[-1].lower(),
+                "COMMENT_SOURCE": "github-app",
             }
         )
+        cfg = find_target(target_id=env_vars["TARGET_ID"], github_repo=repo)
+        if cfg:
+            log.info(
+                "loaded target config %s (engine=%s)",
+                cfg.get("_path"),
+                cfg.get("engine"),
+            )
+            env_vars = apply_target_to_environ(cfg, env_vars)
         script = deploy_dir() / "scripts" / "run_pr_fuzz_job.sh"
         result = subprocess.run(
             ["bash", str(script)],
@@ -279,6 +318,7 @@ def handle_pull_request(payload: dict[str, Any]) -> tuple[int, str]:
             "repository": repo,
             "pr_number": number,
             "sha": sha,
+            "base_sha": (pr.get("base") or {}).get("sha") or "",
             "installation_id": installation_id,
             "action": action,
         }
@@ -303,7 +343,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path in ("/healthz", "/health", "/"):
-            self._send(200, "ok\n")
+            q = queue_dir()
+            pending = len(list(q.glob("job-*.json")))
+            claimed = len(list(q.glob("job-*.claimed")))
+            oldest_age = 0.0
+            for p in list(q.glob("job-*.json")) + list(q.glob("job-*.claimed")):
+                try:
+                    age = time.time() - p.stat().st_mtime
+                    oldest_age = max(oldest_age, age)
+                except OSError:
+                    pass
+            body = (
+                f"ok queue_pending={pending} queue_claimed={claimed} "
+                f"oldest_job_age_s={int(oldest_age)}\n"
+            )
+            self._send(200, body)
             return
         self._send(404, "not found\n")
 

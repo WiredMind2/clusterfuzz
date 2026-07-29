@@ -9,3 +9,9 @@ harnesses:
   - fuzz/example_fuzzer.py
 ui_url: http://127.0.0.1:9300
 notes: Enabled via central repository_dispatch to WiredMind2/clusterfuzz (see docs/multi-repo.md)
+llm:
+  enabled: true
+  provider: ollama  # or openrouter (set OPENROUTER_API_KEY in runner/app env)
+  model: Qwen2.5-Coder:1.5b
+  base_url: http://127.0.0.1:11434
+  background: true
