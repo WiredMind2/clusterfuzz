@@ -53,10 +53,10 @@ jobs:
     timeout-minutes: 30
 
     env:
-      FUZZ_ENGINE: ${{ inputs.fuzz_engine != '' && inputs.fuzz_engine || vars.FUZZ_ENGINE || 'libfuzzer' }}
+      FUZZ_ENGINE: ${{ inputs.fuzz_engine || vars.FUZZ_ENGINE || 'libfuzzer' }}
       FUZZ_SECONDS: ${{ vars.FUZZ_SECONDS || '60' }}
       CLUSTERFUZZ_UI_URL: ${{ vars.CLUSTERFUZZ_UI_URL || 'http://127.0.0.1:9300' }}
-      TARGET_ID: ${{ inputs.target_id != '' && inputs.target_id || vars.TARGET_ID || 'unknown' }}
+      TARGET_ID: ${{ inputs.target_id || vars.TARGET_ID || 'unknown' }}
       LOCAL_GCS_ROOT: ${{ vars.LOCAL_GCS_ROOT || '/data/local_gcs' }}
       ATHERIS_HARNESSES: ${{ vars.ATHERIS_HARNESSES || '' }}
       SKIP_INGEST: ${{ vars.SKIP_INGEST || '' }}
@@ -69,8 +69,8 @@ jobs:
       LLM_FUZZ_TIMEOUT_S: ${{ vars.LLM_FUZZ_TIMEOUT_S || '45' }}
       LLM_FUZZ_BG_ENABLED: ${{ vars.LLM_FUZZ_BG_ENABLED || '1' }}
       LLM_FUZZ_QUEUE_DIR: ${{ vars.LLM_FUZZ_QUEUE_DIR || '/data/llm_fuzz_queue' }}
-      TARGET_REPOSITORY: ${{ inputs.target_repository != '' && inputs.target_repository || github.repository }}
-      PR_NUMBER: ${{ inputs.pr_number != '' && inputs.pr_number || github.event.pull_request.number }}
+      TARGET_REPOSITORY: ${{ inputs.target_repository || github.repository }}
+      PR_NUMBER: ${{ inputs.pr_number }}
       CROSS_REPO: ${{ inputs.cross_repo }}
 
     steps:
@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.TARGET_REPOSITORY }}
-          ref: ${{ inputs.checkout_ref != '' && inputs.checkout_ref || github.sha }}
+          ref: ${{ inputs.checkout_ref || github.sha }}
           token: ${{ secrets.CROSS_REPO_TOKEN || github.token }}
 
       - name: Locate ClusterFuzz deploy glue
@@ -265,7 +265,7 @@ jobs:
         env:
           GITHUB_REPOSITORY: ${{ env.TARGET_REPOSITORY }}
           PR_NUMBER: ${{ env.PR_NUMBER }}
-          GITHUB_SHA: ${{ inputs.checkout_ref != '' && inputs.checkout_ref || github.sha }}
+          GITHUB_SHA: ${{ inputs.checkout_ref || github.sha }}
         run: |
           set -euo pipefail
           DEPLOY="${{ steps.glue.outputs.deploy }}"

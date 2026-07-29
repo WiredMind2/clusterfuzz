@@ -17,6 +17,6 @@ jobs:
       CROSS_REPO_TOKEN: ${{ secrets.CLUSTERFUZZ_CROSS_REPO_TOKEN }}
     with:
       target_repository: ${{ github.repository }}
-      pr_number: ${{ github.event.pull_request.number }}
+      pr_number: ${{ format('{0}', github.event.pull_request.number) }}
       checkout_ref: ${{ github.event.pull_request.head.sha }}
       cross_repo: "0"
