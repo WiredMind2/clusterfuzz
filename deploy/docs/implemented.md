@@ -7,7 +7,7 @@ Status legend:
 - **Present** — exists in the workspace / verified running as of the last refresh
 - **Optional / not started** — present as files but not running (needs secrets or operator action)
 
-> Last refresh: after all three build phases. Continuous farm is **up** (`cf-server` healthy, `cf-bot` running). UI answers HTTP 200 on `http://127.0.0.1:9300/`. See also `deploy/BOOTSTRAP_STATUS.md`.
+> Last refresh: public repo `WiredMind2/clusterfuzz` live; continuous farm up; **gha-runner online** on this repo (`clusterfuzz-local`). UI HTTP 200 on `http://127.0.0.1:9300/`. See also `deploy/BOOTSTRAP_STATUS.md`.
 
 ## Top-level layout
 
@@ -46,7 +46,7 @@ Status legend:
 | --- | --- | --- |
 | `cf-server` | Local UI on host `127.0.0.1:9300` (+ `9308` GCS emulator); shared `/data` | **Running** (healthy) |
 | `cf-bot` | `run_bot` with `--server-storage-path /data` (via image/entrypoint); host network | **Running** |
-| `gha-runner` | Labels `self-hosted`, `linux`, `clusterfuzz-local`; start via runner override + `runner.env` | **Optional / not started** (needs secrets) |
+| `gha-runner` | Labels `self-hosted`, `linux`, `clusterfuzz-local`; start via runner override + `runner.env` | **Running** — registered to `WiredMind2/clusterfuzz` |
 
 Images in use: `clusterfuzz-server:local`, `clusterfuzz-bot:local`.
 
@@ -59,7 +59,7 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/scripts/bootstrap.sh` | Build images, `run_server --bootstrap`, start stack, write `BOOTSTRAP_STATUS.md` | **Present** (already run successfully) |
 | `data/local_gcs/` | Filesystem GCS (`test-*-bucket`, …) | **Present** |
 | `data/bot/clusterfuzz/bot/logs/bot.log` | Bot log | **Present** |
-| `data/runner/` | Actions runner registration dir (created by bootstrap) | **Present** (empty until runner registers) |
+| `data/runner/` | Actions runner registration dir (created by bootstrap) | **Present** (registered to `WiredMind2/clusterfuzz`) |
 | `deploy/data` → `../data` | Symlink for compose.runner / ingest defaults | **Present** |
 
 ## Demo fuzz target
@@ -81,13 +81,14 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/scripts/ingest_build.sh` | Drop builds/crashes into `local_gcs` | **Present** |
 | `deploy/scripts/post_pr_comments.py` | Crash artifacts → GitHub PR review comments | **Present** |
 
-## GitHub workflow template
+## GitHub workflow and targets
 
 | Path | Role | Status |
 | --- | --- | --- |
-| `deploy/workflows/fuzz-pr.yml` | Template: self-hosted build → timed fuzz → ingest → comments | **Present** |
-
-Copy into target repos as `.github/workflows/fuzz-pr.yml`. Default build step uses the bundled demo target.
+| `deploy/workflows/fuzz-pr.yml` | Template for other repos | **Present** |
+| `.github/workflows/fuzz-pr.yml` | In-repo PR fuzz workflow (libFuzzer default) | **Present** |
+| `deploy/targets/clusterfuzz.yaml` | Self-test / demo libFuzzer on this repo | **Present** |
+| `deploy/targets/animemanager.yaml` | Pilot: WiredMind2/AnimeManager (Atheris; deferred) | **Present** (not wired yet) |
 
 ## Documentation
 
@@ -120,7 +121,7 @@ Host **`:9000`** is reserved for Tetrazero. This deploy remaps ClusterFuzz local
 ## Explicitly not implemented (see limitations)
 
 - GCP production stack (`create_config`, App Engine, Firebase, real GCS, Datastore, Pub/Sub, BigQuery, Stackdriver, GCE bots)
+- Registered / running `gha-runner` on other repos (AnimeManager pilot deferred; this repo is the self-test target)
 - Native ClusterFuzz GitHub / PR integration
 - BigQuery / Stackdriver crash-stats dashboards
 - Windows / macOS bots
-- Registered / running `gha-runner` (files ready; needs `runner.env` secrets)
