@@ -93,6 +93,15 @@ Do not document or demo this as an upstream feature.
 - No runner ⇒ workflows wait; no PR fuzz; no automated comments.
 - GitHub-hosted runners are **intentionally not** used for fuzz compute (no shared `local_gcs`, different environment).
 
+### LLM assist limitations
+
+- Local **Ollama** (or compatible HTTP) only by default; not a cloud control plane.
+- LLM improves seeds/dictionaries and triage text; **libFuzzer / Atheris still mutate**.
+- Prep/triage are fail-open — Ollama downtime must not block PR fuzz.
+- Background `llm-fuzz-worker` can contend for CPU with `cf-bot`; capped via Compose `cpus` / single-job processing.
+- Follow-up PR comments need a `GITHUB_TOKEN` in `llm-worker.env` (Actions job token is gone after the workflow ends).
+- Do not put secrets or large private trees into LLM prompts (scripts cap prompt size).
+
 ### Auth and visibility of UI links in comments
 
 - Comments may include links to `http://<host>:9300/…`. Those only help people who can reach this server’s network.
@@ -112,6 +121,7 @@ Do not document or demo this as an upstream feature.
 | Production **GCP migration path** | Outline only — see below |
 | Native upstream GitHub support | Would require ClusterFuzz product work; out of scope |
 | Full crash-stats dashboards in local mode | Blocked on BigQuery/Stackdriver (or a new local analytics design) |
+| LLM mutator-in-the-loop / fine-tuning | Out of scope; seeds+dict+triage+bg worker only |
 
 ### Outline: what a later GCP migration would add
 

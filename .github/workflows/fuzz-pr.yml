@@ -9,6 +9,10 @@
 #   LOCAL_GCS_ROOT     — for libfuzzer ingest (default /data/local_gcs)
 #   ATHERIS_HARNESSES  — space-separated harness paths (atheris)
 #   SKIP_INGEST        — "1" to skip local_gcs ingest (recommended for atheris)
+#   LLM_FUZZ_ENABLED   — "1" to run Ollama seed/dict prep + triage (default: 1)
+#   LLM_FUZZ_MODEL     — Ollama model (default: Qwen2.5-Coder:1.5b)
+#   LLM_FUZZ_BASE_URL  — default http://127.0.0.1:11434
+#   LLM_FUZZ_BG_ENABLED — "1" to enqueue background deep-fuzz job (default: 1)
 #
 # Secrets: GITHUB_TOKEN is provided by Actions (needs pull-requests: write)
 
@@ -38,6 +42,12 @@ jobs:
       ARTIFACT_DIR: ${{ github.workspace }}/fuzz-artifacts
       OTEL_EXPORTER_OTLP_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://127.0.0.1:4318' }}
       OTEL_SERVICE_NAME: clusterfuzz-pr-fuzz
+      LLM_FUZZ_ENABLED: ${{ vars.LLM_FUZZ_ENABLED || '1' }}
+      LLM_FUZZ_BASE_URL: ${{ vars.LLM_FUZZ_BASE_URL || 'http://127.0.0.1:11434' }}
+      LLM_FUZZ_MODEL: ${{ vars.LLM_FUZZ_MODEL || 'Qwen2.5-Coder:1.5b' }}
+      LLM_FUZZ_TIMEOUT_S: ${{ vars.LLM_FUZZ_TIMEOUT_S || '45' }}
+      LLM_FUZZ_BG_ENABLED: ${{ vars.LLM_FUZZ_BG_ENABLED || '1' }}
+      LLM_FUZZ_QUEUE_DIR: ${{ vars.LLM_FUZZ_QUEUE_DIR || '/data/llm_fuzz_queue' }}
 
     steps:
       - name: Checkout
@@ -78,14 +88,51 @@ jobs:
             "${GITHUB_WORKSPACE}/deploy/demo-target/build.sh" "${{ github.run_number }}"
             echo "BINARY=${GITHUB_WORKSPACE}/deploy/demo-target/out/demo-fuzz" >> "$GITHUB_ENV"
             echo "ZIP=$(ls -1 ${GITHUB_WORKSPACE}/deploy/demo-target/out/demo-fuzz-*.zip | tail -1)" >> "$GITHUB_ENV"
+            echo "SOURCE_PATHS=${GITHUB_WORKSPACE}/deploy/demo-target/demo_fuzz.cc" >> "$GITHUB_ENV"
           elif [[ -x "${DEPLOY}/demo-target/build.sh" ]]; then
             OUT_DIR="${GITHUB_WORKSPACE}/out" "${DEPLOY}/demo-target/build.sh" "${{ github.run_number }}"
             echo "BINARY=${GITHUB_WORKSPACE}/out/demo-fuzz" >> "$GITHUB_ENV"
             echo "ZIP=$(ls -1 ${GITHUB_WORKSPACE}/out/demo-fuzz-*.zip | tail -1)" >> "$GITHUB_ENV"
+            echo "SOURCE_PATHS=${DEPLOY}/demo-target/demo_fuzz.cc" >> "$GITHUB_ENV"
           else
             echo "error: no build.sh found — wire your project build here" >&2
             exit 1
           fi
+
+      - name: Setup Atheris
+        if: env.FUZZ_ENGINE == 'atheris'
+        run: |
+          set -euo pipefail
+          python3 -m venv "${GITHUB_WORKSPACE}/.venv-fuzz"
+          # shellcheck disable=SC1091
+          source "${GITHUB_WORKSPACE}/.venv-fuzz/bin/activate"
+          python -m pip install --upgrade pip
+          if [[ -f fuzz/requirements.txt ]]; then
+            python -m pip install -r fuzz/requirements.txt
+          else
+            python -m pip install atheris
+          fi
+          if [[ -f pyproject.toml ]] || [[ -f setup.py ]]; then
+            python -m pip install -e . || true
+          fi
+          echo "PYTHON=${GITHUB_WORKSPACE}/.venv-fuzz/bin/python" >> "$GITHUB_ENV"
+          echo "${GITHUB_WORKSPACE}/.venv-fuzz/bin" >> "$GITHUB_PATH"
+          if [[ -n "${ATHERIS_HARNESSES}" ]]; then
+            # shellcheck disable=SC2086
+            echo "SOURCE_PATHS=${ATHERIS_HARNESSES}" >> "$GITHUB_ENV"
+          else
+            mapfile -t H < <(find fuzz -maxdepth 1 -type f -name '*_fuzzer.py' | sort)
+            echo "SOURCE_PATHS=${H[*]}" >> "$GITHUB_ENV"
+          fi
+
+      - name: LLM prepare seeds and dictionary
+        if: env.LLM_FUZZ_ENABLED == '1'
+        run: |
+          set -euo pipefail
+          DEPLOY="${{ steps.glue.outputs.deploy }}"
+          mkdir -p "${ARTIFACT_DIR}"
+          # shellcheck disable=SC2086
+          python3 "${DEPLOY}/scripts/llm_fuzz_prepare.py" --github-env ${SOURCE_PATHS:-}
 
       - name: Timed libFuzzer
         if: env.FUZZ_ENGINE == 'libfuzzer'
@@ -101,26 +148,6 @@ jobs:
           DEPLOY="${{ steps.glue.outputs.deploy }}"
           LOCAL_GCS_ROOT="${LOCAL_GCS_ROOT}" \
             "${DEPLOY}/scripts/ingest_build.sh" "${ZIP}"
-
-      - name: Setup Atheris
-        if: env.FUZZ_ENGINE == 'atheris'
-        run: |
-          set -euo pipefail
-          # Ubuntu Noble marks system Python as PEP 668; use a job-local venv.
-          python3 -m venv "${GITHUB_WORKSPACE}/.venv-fuzz"
-          # shellcheck disable=SC1091
-          source "${GITHUB_WORKSPACE}/.venv-fuzz/bin/activate"
-          python -m pip install --upgrade pip
-          if [[ -f fuzz/requirements.txt ]]; then
-            python -m pip install -r fuzz/requirements.txt
-          else
-            python -m pip install atheris
-          fi
-          if [[ -f pyproject.toml ]] || [[ -f setup.py ]]; then
-            python -m pip install -e . || true
-          fi
-          echo "PYTHON=${GITHUB_WORKSPACE}/.venv-fuzz/bin/python" >> "$GITHUB_ENV"
-          echo "${GITHUB_WORKSPACE}/.venv-fuzz/bin" >> "$GITHUB_PATH"
 
       - name: Timed Atheris
         if: env.FUZZ_ENGINE == 'atheris'
@@ -148,6 +175,13 @@ jobs:
             "${DEPLOY}/scripts/run_timed_atheris.sh" "${h}" "${PER}" "${ARTIFACT_DIR}"
           done
 
+      - name: LLM crash triage
+        if: always() && env.LLM_FUZZ_ENABLED == '1'
+        run: |
+          set -euo pipefail
+          DEPLOY="${{ steps.glue.outputs.deploy }}"
+          python3 "${DEPLOY}/scripts/llm_crash_triage.py" || true
+
       - name: Post PR review comments
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -160,6 +194,17 @@ jobs:
           set -euo pipefail
           DEPLOY="${{ steps.glue.outputs.deploy }}"
           python3 "${DEPLOY}/scripts/post_pr_comments.py"
+
+      - name: Enqueue background LLM deep-fuzz
+        if: always() && env.LLM_FUZZ_BG_ENABLED == '1'
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          DEPLOY="${{ steps.glue.outputs.deploy }}"
+          python3 "${DEPLOY}/scripts/llm_fuzz_enqueue.py" || true
 
       - name: Report OTLP (best-effort)
         if: always()
