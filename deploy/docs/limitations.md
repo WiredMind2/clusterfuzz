@@ -67,19 +67,21 @@ What **does** still work in local mode (and is the point of this stack): running
 
 ### No native PR comments or Actions integration
 
-ClusterFuzz upstream has **no** first-class GitHub PR commenting and **no** Actions integration. Anything that looks like “ClusterFuzz commented on my PR” is **our custom bridge**:
+ClusterFuzz upstream has **no** first-class GitHub PR commenting and **no** Actions/App integration. Anything that looks like “ClusterFuzz commented on my PR” is **our custom bridge**:
 
-- Self-hosted runner (`gha-runner`)
-- Workflow template (`deploy/workflows/fuzz-pr.yml`)
+- **Preferred:** GitHub App + `cf-github-app` + `cloudflared` (`fuzzing.tetrazero.com`) — [github-app.md](github-app.md)
+- Self-hosted runner (`gha-runner`) + thin workflow callers (pilot / cutover)
 - Reporter (`deploy/scripts/post_pr_comments.py`)
 
 Do not document or demo this as an upstream feature.
 
 ### PR path vs async job queue
 
-- **Source of truth for PR comments:** timed fuzz on the runner (synchronous, mapped to that PR).
-- **Not** sufficient alone: enqueue a CF task and hope a bot finishes before the workflow ends — that race is why we chose timed runner fuzz.
+- **Source of truth for PR comments:** timed fuzz on the App worker or runner (synchronous, mapped to that PR).
+- **Not** sufficient alone: enqueue a CF task and hope a bot finishes before the job ends — that race is why we chose timed fuzz.
 - Background `cf-server` / `cf-bot` still matter for continuous coverage and UI triage after ingest.
+- App path requires a working **public webhook** (`fuzzing.tetrazero.com` via cloudflared); if the tunnel or `cf-github-app` is down, PRs are not fuzzed on that path.
+- Pilots with both App install and a thin `fuzz-pr.yml` may get **duplicate** jobs until one path is disabled.
 
 ### Bug tracking
 
@@ -87,10 +89,10 @@ Do not document or demo this as an upstream feature.
 - We do **not** wire Monorail, GitHub Issues auto-filing, or another tracker beyond **PR review comments**.
 - Persistent triage beyond the PR still happens in the local ClusterFuzz UI (and your own process).
 
-### Runner availability
+### Runner / App worker availability
 
-- Self-hosted runner **must stay online**.
-- No runner ⇒ workflows wait; no PR fuzz; no automated comments.
+- Actions path: self-hosted runner **must stay online** (no runner ⇒ workflows wait).
+- App path: `cf-github-app` + `cloudflared` **must stay online** (no tunnel ⇒ GitHub cannot deliver webhooks).
 - GitHub-hosted runners are **intentionally not** used for fuzz compute (no shared `local_gcs`, different environment).
 
 ### LLM assist limitations

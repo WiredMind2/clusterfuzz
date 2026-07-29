@@ -8,18 +8,23 @@ This stack runs **official ClusterFuzz in local mode** on a single Docker host, 
 flowchart TB
   subgraph github [GitHub]
     PR[Pull request]
+    App[GitHub App webhooks]
     WF[Workflow runs-on self-hosted]
   end
   subgraph host [This server - Docker Compose]
+    Tunnel[cloudflared fuzzing.tetrazero.com]
+    GHApp[cf-github-app :9310]
     Runner[gha-runner]
     Server[cf-server butler run_server]
     Bot[cf-bot butler run_bot]
     GCS[volume local_gcs]
-    Demo[demo-builder optional]
   end
+  PR --> App
+  App --> Tunnel
+  Tunnel --> GHApp
+  GHApp -->|timed fuzz + comments| PR
   PR --> WF
   WF --> Runner
-  Runner -->|build ASan zip + kick fuzz| Bot
   Runner -->|or upload build| GCS
   Server --> GCS
   Bot --> GCS
@@ -31,7 +36,9 @@ flowchart TB
 | --- | --- | --- |
 | `cf-server` | `clusterfuzz-server:local` → `butler.py run_server` | Local web UI (**host** `127.0.0.1:9300`), task scheduling; **`network_mode: host`** |
 | `cf-bot` | `clusterfuzz-bot:local` → `butler.py run_bot` | Pulls fuzz tasks, runs fuzzers; same host network + shared `/data` |
-| `gha-runner` | Override `docker-compose.runner.yml` | Self-hosted CI worker; builds targets, timed PR fuzz, posts comments |
+| `cf-github-app` | Override `docker-compose.github-app.yml` | Sourcery-style webhooks + timed PR fuzz + App comments (`127.0.0.1:9310`) |
+| `cloudflared` | Same override | TLS for `fuzzing.tetrazero.com` → `:9310` |
+| `gha-runner` | Override `docker-compose.runner.yml` | Self-hosted CI worker (pilot / cutover path) |
 | Shared volume | Host `data/` → `/data` (`deploy/data` → `../data` symlink) | Filesystem GCS at `/data/local_gcs` |
 
 Optional: a one-shot **demo builder** (or script under `deploy/demo-target/`) produces a revisioned zip and drops it into `local_gcs` so continuous bots have something to fuzz before a real repo is wired.
@@ -49,15 +56,16 @@ This path is entirely **upstream local-mode ClusterFuzz**. No GitHub is required
 
 ### PR-triggered fuzzing (commentable path)
 
-Chosen design: **synchronous timed fuzz on the self-hosted runner**, so findings map cleanly to a PR.
+**Preferred:** GitHub App webhooks → `cloudflared` (`fuzzing.tetrazero.com`) → `cf-github-app` (`127.0.0.1:9310`) → timed fuzz → PR comments as the App. See [github-app.md](github-app.md).
 
-1. A pull request opens or updates → GitHub Actions workflow `fuzz-pr.yml` is queued.
-2. Job runs on labels `[self-hosted, clusterfuzz-local]` → lands on `gha-runner` on this host.
-3. Runner builds **ASan** (or other configured) libFuzzer binaries, runs a **time-boxed** fuzz session using the same toolchain / image family as the bots.
-4. Crashes and builds are also **ingested into `local_gcs`** so `cf-server` + `cf-bot` continue background fuzzing and UI triage.
-5. `deploy/scripts/post_pr_comments.py` posts **PR review comments** via the GitHub API (stack excerpts + links into the local UI when available).
+**Alternate (pilots):** synchronous timed fuzz on the self-hosted runner.
 
-**Important:** The async ClusterFuzz job queue alone is **not** the source of truth for PR comments. Timed runner fuzz is, so comment latency and mapping stay predictable.
+1. A pull request opens or updates → App webhook **or** Actions workflow `fuzz-pr.yml`.
+2. App worker / runner builds and runs a **time-boxed** fuzz session.
+3. Crashes and builds may be **ingested into `local_gcs`** so `cf-server` + `cf-bot` continue background fuzzing.
+4. `deploy/scripts/post_pr_comments.py` posts **PR review comments** via the GitHub API (installation token or Actions/PAT).
+
+**Important:** The async ClusterFuzz job queue alone is **not** the source of truth for PR comments. Timed fuzz is, so comment latency and mapping stay predictable.
 
 ```mermaid
 sequenceDiagram

@@ -1,6 +1,10 @@
 # GitHub integration
 
-Official ClusterFuzz does **not** integrate with GitHub Actions or post PR review comments. This deployment adds a **self-hosted runner** and a **small reporter** so PRs can trigger fuzzing on this server and receive comments when crashes are found.
+Official ClusterFuzz does **not** integrate with GitHub Actions or post PR review comments. This deployment adds custom glue so PRs can trigger fuzzing on this server and receive comments when crashes are found.
+
+**Sourcery-style (recommended for all repos):** private **GitHub App** + `cloudflared` at `fuzzing.tetrazero.com` — see [github-app.md](github-app.md). No per-repo workflow required.
+
+**Actions path (pilots / cutover):** **self-hosted runner** + thin callers + `post_pr_comments.py` (below).
 
 ## Why self-hosted (not GitHub-hosted)
 
@@ -121,9 +125,9 @@ Store registration secrets in the host environment or a gitignored `deploy/.env`
 
 ## Operational notes
 
-- Keep **`gha-runner` up** whenever you expect PR fuzzing.
-- Label drift breaks scheduling: workflow `runs-on` and runner labels must stay aligned.
-- Do not point these workflows at GitHub-hosted runners and expect `local_gcs` ingest or the same sanitizer environment.
-- For org-wide use, prefer GitHub **runner groups** and explicit repository allow-lists (future / optional hardening).
+- **App path:** keep **`cf-github-app` + `cloudflared` up** for account-wide PR fuzzing ([github-app.md](github-app.md)).
+- **Actions path:** keep **`gha-runner` up** for pilot thin-caller repos; label drift breaks scheduling.
+- Do not point Actions fuzz workflows at GitHub-hosted runners and expect `local_gcs` ingest or the same sanitizer environment.
+- Avoid enabling both App and thin `fuzz-pr.yml` on the same repo unless you want duplicate jobs.
 
-See also: [architecture.md](architecture.md) (data flow), [setup.md](setup.md) (registration steps), [multi-repo.md](multi-repo.md) (`cf_enable_repo.sh`), [limitations.md](limitations.md) (GitHub gaps).
+See also: [github-app.md](github-app.md) (Sourcery-style App), [architecture.md](architecture.md) (data flow), [setup.md](setup.md) (registration steps), [multi-repo.md](multi-repo.md) (`cf_enable_repo.sh`), [limitations.md](limitations.md) (GitHub gaps).

@@ -35,9 +35,14 @@ Status legend:
 | `deploy/Dockerfile.server` | Builds `clusterfuzz-server:local` | **Present** |
 | `deploy/Dockerfile.bot` | Builds `clusterfuzz-bot:local` (FROM server image) | **Present** |
 | `deploy/Dockerfile.runner` | Builds `clusterfuzz-gha-runner:local` | **Present** |
+| `deploy/Dockerfile.github-app` | Builds `clusterfuzz-github-app:local` | **Present** |
 | `deploy/docker-compose.runner.yml` | **Override** for `gha-runner` (not in main compose by default) | **Present** |
+| `deploy/docker-compose.github-app.yml` | **Override** for `cf-github-app` + `cloudflared` | **Present** |
 | `deploy/runner.env.example` | Template for `REPO_URL` / tokens / labels | **Present** |
+| `deploy/github-app.env.example` | App ID, webhook secret, key path | **Present** |
+| `deploy/cloudflared.env.example` | `TUNNEL_TOKEN` for fuzzing.tetrazero.com | **Present** |
 | `deploy/GITHUB_RUNNER.md` | Runner registration how-to | **Present** |
+| `deploy/docs/github-app.md` | Sourcery-style App + tunnel setup | **Present** |
 | `deploy/BOOTSTRAP_STATUS.md` | Bootstrap result, port conflict note, verified checks | **Present** |
 
 **Compose services (runtime):**
@@ -46,6 +51,8 @@ Status legend:
 | --- | --- | --- |
 | `cf-server` | Local UI on host `127.0.0.1:9300` (+ `9308` GCS emulator); shared `/data` | **Running** (healthy) |
 | `cf-bot` | `run_bot` with `--server-storage-path /data` (via image/entrypoint); host network | **Running** |
+| `cf-github-app` | Webhooks on `127.0.0.1:9310`; timed PR fuzz; App comments | **Optional / not started** (needs App + secrets) |
+| `cloudflared` | `fuzzing.tetrazero.com` → `:9310` | **Optional / not started** (needs `TUNNEL_TOKEN`) |
 | `gha-runner` | Labels `self-hosted`, `linux`, `clusterfuzz-local`; start via runner override + `runner.env` | **Optional / not started** (needs secrets) |
 
 Images in use: `clusterfuzz-server:local`, `clusterfuzz-bot:local`.
@@ -80,6 +87,11 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/scripts/run_timed_fuzz.sh` | Time-boxed libFuzzer run for PR path | **Present** |
 | `deploy/scripts/ingest_build.sh` | Drop builds/crashes into `local_gcs` | **Present** |
 | `deploy/scripts/post_pr_comments.py` | Crash artifacts → GitHub PR review comments | **Present** |
+| `deploy/scripts/github_app_server.py` | GitHub App webhooks + job queue worker | **Present** |
+| `deploy/scripts/github_app_auth.py` | App JWT + installation tokens | **Present** |
+| `deploy/scripts/run_pr_fuzz_job.sh` | App-path timed fuzz (mirrors reusable workflow) | **Present** |
+| `deploy/github-app/deny-repos.txt` | Farm-side mute list | **Present** |
+| `deploy/github-app/app-manifest.yml` | App registration helper | **Present** |
 | `deploy/scripts/llm_fuzz_prepare.py` | Ollama seeds + libFuzzer dict (fail-open) | **Present** |
 | `deploy/scripts/llm_crash_triage.py` | Ollama triage → `triage.md` | **Present** |
 | `deploy/scripts/llm_fuzz_enqueue.py` | Queue deep-fuzz job after PR run | **Present** |

@@ -1,6 +1,11 @@
-# Snippet for TetrazeroDashboard services.yaml
-# Merge under `services:` then refresh the dashboard as usual.
-# Port 9300 assumes ClusterFuzz local UI remap (Tetrazero keeps :9000).
+# Snippet for TetrazeroDashboard — cloudflared explicit hostname (not Caddy).
+# Already applied in cloudflared/config.yml on this host:
+#
+#   - hostname: fuzzing.tetrazero.com
+#     service: http://127.0.0.1:9310
+#
+# Deploy: cd /home/william/TetrazeroDashboard && ./scripts/deploy-cloudflared.sh
+# UI stays local-only on :9300.
 
   clusterfuzz:
     label: ClusterFuzz (local)
@@ -10,6 +15,5 @@
     port: 9300
     group: infrastructure
     notes: >-
-      Host networking; UI on :9300. Optional gha-runner via
-      docker-compose.runner.yml + gitignored runner.env (PAT/registration token).
-      Heavy stack — start manually when needed. Depends on free 930x ports.
+      UI :9300 local-only. Webhooks 127.0.0.1:9310 via fuzzing.tetrazero.com
+      (explicit cloudflared ingress). Do not start compose cloudflared.

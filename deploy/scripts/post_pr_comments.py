@@ -185,8 +185,8 @@ def build_review_body(
         ]
 
     parts.append(
-        "_Posted by `deploy/scripts/post_pr_comments.py` (custom glue — "
-        "ClusterFuzz does not natively comment on GitHub PRs)._"
+        "_Posted by ClusterFuzz local glue "
+        "(`post_pr_comments.py` / GitHub App — not upstream ClusterFuzz)._"
     )
     return "\n".join(parts)
 

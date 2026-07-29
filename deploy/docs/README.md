@@ -1,14 +1,15 @@
 # Local Docker ClusterFuzz
 
-Dockerized **local-mode** (no GCP) ClusterFuzz on this host, triggered by GitHub via a self-hosted Actions runner, with a small custom bridge that posts PR review comments when fuzzing finds crashes.
+Dockerized **local-mode** (no GCP) ClusterFuzz on this host, with GitHub PR fuzz comments via a Sourcery-style **GitHub App** (preferred) or a self-hosted Actions runner (pilots).
 
 ## What this is
 
 | Piece | Role |
 | --- | --- |
 | Official `google/clusterfuzz` **v2.35.0** (local mode) | UI, task queue, bots, corpus, minimize, filesystem “GCS” |
-| Docker Compose (`cf-server`, `cf-bot`; optional `gha-runner`) | Always-on fuzz farm + CI worker on this machine |
-| Custom glue | Self-hosted runner workflow + `post_pr_comments.py` for GitHub PR reviews |
+| Docker Compose (`cf-server`, `cf-bot`; optional App / runner) | Always-on fuzz farm + PR workers on this machine |
+| GitHub App + cloudflared | Account-wide PR webhooks at `fuzzing.tetrazero.com` — [github-app.md](github-app.md) |
+| Custom glue | Timed fuzz + `post_pr_comments.py` for GitHub PR reviews |
 
 ## What this is not
 
@@ -39,25 +40,34 @@ docker compose up -d
 curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9300/
 # → open http://127.0.0.1:9300/
 
-# Optional self-hosted runner (override compose + secrets)
+# Optional GitHub App (all-repo PR fuzz via fuzzing.tetrazero.com)
+cp github-app.env.example github-app.env       # App ID, webhook secret
+cp cloudflared.env.example cloudflared.env     # TUNNEL_TOKEN
+# place private-key.pem under github-app/ — see docs/github-app.md
+docker compose -f docker-compose.yml -f docker-compose.github-app.yml \
+  --env-file github-app.env up -d --build cf-github-app cloudflared
+
+# Optional self-hosted runner (pilot / cutover path)
 cp runner.env.example runner.env   # set REPO_URL + token
 docker compose -f docker-compose.yml -f docker-compose.runner.yml --env-file runner.env up -d gha-runner
 ```
 
-**Ports:** this deploy remaps local-mode ports from upstream `900x` to **`9300–9309`** via `deploy/scripts/apply_local_ports.sh` at image build time, so Tetrazero can keep **`:9000`**. Ensure **`9300`/`9308`** (etc.) are free — see `BOOTSTRAP_STATUS.md`.
+**Ports:** this deploy remaps local-mode ports from upstream `900x` to **`9300–9309`** via `deploy/scripts/apply_local_ports.sh` at image build time, so Tetrazero can keep **`:9000`**. App webhooks use **`127.0.0.1:9310`** behind cloudflared. Ensure **`9300`/`9308`** (etc.) are free — see `BOOTSTRAP_STATUS.md`.
 
 Data lives at repo-root **`data/`** (mounted `../data:/data`). `deploy/data` is a symlink to `../data` for runner/ingest paths.
 
-Demo target: `deploy/demo-target/` + `scripts/ingest_build.sh`. PR template: `deploy/workflows/fuzz-pr.yml` — see [github-integration.md](github-integration.md) and `deploy/GITHUB_RUNNER.md`.
+Demo target: `deploy/demo-target/` + `scripts/ingest_build.sh`. App docs: [github-app.md](github-app.md). Actions template: `deploy/workflows/fuzz-pr.yml` — see [github-integration.md](github-integration.md) and `deploy/GITHUB_RUNNER.md`.
 
 ## Documentation index
 
 | Doc | Contents |
 | --- | --- |
-| [architecture.md](architecture.md) | Server / bot / local_gcs / runner / GitHub diagram and data flows; upstream vs glue |
-| [setup.md](setup.md) | Host prereqs, image builds, bootstrap, volumes, runner registration, wiring repos |
+| [architecture.md](architecture.md) | Server / bot / local_gcs / App / runner / GitHub diagram and data flows |
+| [setup.md](setup.md) | Host prereqs, image builds, bootstrap, volumes, wiring repos |
 | [operations.md](operations.md) | Start/stop, logs, jobs/builds, backup, troubleshooting |
+| [github-app.md](github-app.md) | Sourcery-style GitHub App + cloudflared (`fuzzing.tetrazero.com`) |
 | [github-integration.md](github-integration.md) | Self-hosted runner, workflow template, comment format, permissions |
+| [multi-repo.md](multi-repo.md) | App default-on + optional `cf_enable_repo.sh` |
 | [implemented.md](implemented.md) | Inventory of what shipped / is running |
 | [limitations.md](limitations.md) | GCP gaps, local-mode limits, GitHub gaps, future work |
 | [`../BOOTSTRAP_STATUS.md`](../BOOTSTRAP_STATUS.md) | Last bootstrap verification + port notes |
@@ -67,12 +77,14 @@ Demo target: `deploy/demo-target/` + `scripts/ingest_build.sh`. PR template: `de
 ```
 clusterfuzz/
   upstream/                      # google/clusterfuzz @ v2.35.0
-  data/                          # local_gcs, bot, runner (host mount → /data)
+  data/                          # local_gcs, bot, runner, github_app_* (host mount → /data)
   deploy/
     docker-compose.yml           # cf-server + cf-bot (host network)
+    docker-compose.github-app.yml # cf-github-app + cloudflared
     docker-compose.runner.yml    # gha-runner override
-    Dockerfile.server|.bot|.runner
-    scripts/                     # bootstrap, build_upstream_images, timed fuzz, ingest, PR comments
+    Dockerfile.server|.bot|.runner|.github-app
+    github-app/                  # deny list, app manifest, key (gitignored)
+    scripts/                     # bootstrap, timed fuzz, App server, PR comments
     demo-target/
     workflows/fuzz-pr.yml
     data -> ../data              # symlink

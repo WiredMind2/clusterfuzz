@@ -1,10 +1,24 @@
 # Multi-repo PR fuzzing (minimal enable)
 
-One local ClusterFuzz farm + **one** self-hosted runner on `WiredMind2/clusterfuzz` serves many repos.
+One local ClusterFuzz farm serves many repos.
 
-> **Note:** `WiredMind2` is a personal GitHub account (not an Organization), so GitHub org-level runners are unavailable. Multi-repo works via **central `repository_dispatch`**: target repos send an event here; the farm runner checks out the PR and fuzzes it. If you later create a GitHub Organization, use [`workflows/fuzz-pr-org-caller.yml.template`](../workflows/fuzz-pr-org-caller.yml.template) + `RUNNER_SCOPE=org` instead.
+**Preferred for “all repos by default”:** the Sourcery-style **GitHub App** ([github-app.md](github-app.md)) — install once on WiredMind2 with **All repositories**, webhook via `fuzzing.tetrazero.com`, no thin workflow per target. Disable via App install settings, `github-app/deny-repos.txt`, or `.clusterfuzz.yml`.
 
-## One-command enable
+**Legacy / pilot path:** **one** self-hosted runner on `WiredMind2/clusterfuzz` + thin callers. `WiredMind2` is a personal account (no org runners), so that path uses **central `repository_dispatch`**. If you later create a GitHub Organization, use [`workflows/fuzz-pr-org-caller.yml.template`](../workflows/fuzz-pr-org-caller.yml.template) + `RUNNER_SCOPE=org` instead.
+
+---
+
+## GitHub App (default-on)
+
+See [github-app.md](github-app.md). After the App + `cloudflared` are up, new PRs on installed repos are fuzzed without `cf_enable_repo.sh`. Use `cf_enable_repo.sh` when you still want a hand harness scaffold PR or Continuous CF target YAML.
+
+To avoid **double** jobs on pilots that already have a thin `fuzz-pr.yml`, either remove the workflow or deny-list one path.
+
+---
+
+## Actions enable script (optional / pilots)
+
+### One-command enable
 
 On this farm host:
 

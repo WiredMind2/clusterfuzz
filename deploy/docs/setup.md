@@ -12,7 +12,7 @@ Live status after bootstrap: [`../BOOTSTRAP_STATUS.md`](../BOOTSTRAP_STATUS.md) 
 | Docker Compose | `docker compose` v2 plugin |
 | Disk | Enough for upstream checkout, images, corpora, and builds (plan tens of GB for serious use; demo needs far less) |
 | CPU / RAM | Continuous bots + runner builds compete; size for your target |
-| **Host ports free** | **`9300`** (UI) and **`9308`** (local GCS emulator), plus `9302/9304/9306/9309` — remapped from upstream `900x` by `apply_local_ports.sh` at image build; stack uses **`network_mode: host`** |
+| **Host ports free** | **`9300`** (UI) and **`9308`** (local GCS emulator), plus `9302/9304/9306/9309`; App webhook **`9310`** (localhost only) — remapped CF from upstream `900x` by `apply_local_ports.sh`; stack uses **`network_mode: host`** |
 | Git | To clone / update `upstream/` |
 
 No host-level Python 3.11, Java, or ClusterFuzz `install_deps` is required on the bare metal for the compose path.
@@ -25,10 +25,12 @@ Upstream local mode defaults to `:9000` (UI) / `:9008` (GCS). This deploy patche
 
 | Secret | Used for |
 | --- | --- |
-| GitHub PAT or registration token | Register `gha-runner` to a repo or org |
-| Token with `pull-requests: write` (workflow `GITHUB_TOKEN` or PAT) | Post PR review comments from `post_pr_comments.py` |
+| GitHub App ID + private key + webhook secret | Sourcery-style App ([github-app.md](github-app.md)); `github-app.env` |
+| Cloudflare tunnel token | `cloudflared` for `fuzzing.tetrazero.com` (`cloudflared.env`) |
+| GitHub PAT or registration token | Register `gha-runner` (optional pilot path) |
+| Token with `pull-requests: write` | Actions `post_pr_comments.py` when not using the App |
 
-Do **not** commit tokens. Use `deploy/runner.env` (gitignored) from `runner.env.example`.
+Do **not** commit tokens. Use gitignored `deploy/github-app.env`, `deploy/cloudflared.env`, `deploy/runner.env`.
 
 ## Repository layout
 

@@ -3,6 +3,13 @@
 /.cursor/
 /deploy/runner.env
 /deploy/runner.env.tmp
+/deploy/llm-worker.env
+/deploy/github-app.env
+/deploy/cloudflared.env
+/deploy/github-app/private-key.pem
+/deploy/github-app/*.pem
+/deploy/github-app/credentials.json
+/deploy/github-app/cloudflared-config.yml
 /deploy/data
 
 # Official ClusterFuzz checkout lives on disk for builds (see UPSTREAM.md)
