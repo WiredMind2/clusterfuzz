@@ -1,6 +1,10 @@
 # GitHub integration
 
-Official ClusterFuzz does **not** integrate with GitHub Actions or post PR review comments. This deployment adds a **self-hosted runner** and a **small reporter** so PRs can trigger fuzzing on this server and receive comments when crashes are found.
+Official ClusterFuzz does **not** integrate with GitHub Actions or post PR review comments. This deployment adds custom glue so PRs can trigger fuzzing on this server and receive comments when crashes are found.
+
+**Sourcery-style (recommended for all repos):** private **GitHub App** + **host** `cloudflared` at `fuzzing.tetrazero.com` — see [github-app.md](github-app.md). No per-repo workflow required.
+
+**Actions path (opt-in fallback):** **self-hosted runner** + thin callers (`cf_enable_repo.sh --with-actions`) + `post_pr_comments.py` (below).
 
 ## Why self-hosted (not GitHub-hosted)
 
@@ -31,46 +35,61 @@ If the runner is offline, PR fuzz jobs queue indefinitely — there is no fallba
 
 Re-registration is needed if `data/runner` registration files are deleted or the registration is revoked.
 
-## Workflow template walkthrough
+## Actions fallback walkthrough
 
-Template path: `deploy/workflows/fuzz-pr.yml`  
-Copy into target repos as `.github/workflows/fuzz-pr.yml` and adapt build steps.
+Preferred path is the GitHub App ([github-app.md](github-app.md)) — no thin workflow. For the Actions fallback only:
 
-Shipped stages in `fuzz-pr.yml`:
+| Piece | Path |
+| --- | --- |
+| Thin caller template | `deploy/workflows/fuzz-pr-caller.yml.template` → copied as `.github/workflows/fuzz-pr.yml` by `cf_enable_repo.sh --with-actions` |
+| Farm dispatch | `.github/workflows/fuzz-dispatch.yml` (`repository_dispatch`) |
+| Reusable job | `.github/workflows/fuzz-pr-reusable.yml` (runs on `gha-runner`) |
 
-1. **Trigger** — `pull_request` (`opened`, `synchronize`, `reopened`).
-2. **Checkout** — PR head.
-3. **Locate glue** — finds `deploy/scripts/run_timed_fuzz.sh` under the workspace, `/opt/clusterfuzz/deploy`, or `/clusterfuzz/deploy`.
-4. **Build** — default uses bundled `demo-target/build.sh`; replace for a real project.
-5. **LLM prepare** (optional, `LLM_FUZZ_ENABLED=1`) — `llm_fuzz_prepare.py` calls local Ollama for seeds + `.dict`, sets `CORPUS_DIR` / `EXTRA_FUZZ_ARGS` (fail-open).
-6. **Timed fuzz** — `run_timed_fuzz.sh` / Atheris (`FUZZ_SECONDS`, default 60).
-7. **Ingest** — `ingest_build.sh` into `LOCAL_GCS_ROOT` (default `/data/local_gcs`).
-8. **LLM triage** — `llm_crash_triage.py` → `triage.md` appended by the commenter (fail-open).
-9. **Comment** — `post_pr_comments.py` with `pull-requests: write` and optional `CLUSTERFUZZ_UI_URL`.
-10. **Enqueue deep job** (`LLM_FUZZ_BG_ENABLED=1`) — JSON under `/data/llm_fuzz_queue` for the background worker.
+**Thin caller:** GitHub-hosted `ubuntu-latest` job that `repository_dispatch`es into `WiredMind2/clusterfuzz` with PR metadata (needs `CLUSTERFUZZ_DISPATCH_TOKEN`).
 
-Continuous background fuzzing still happens in ClusterFuzz once `cf-server` / `cf-bot` are up; the workflow’s timed session exists so comments have a **synchronous, PR-scoped** result set.
+**Reusable job stages** (on self-hosted `clusterfuzz-local`):
+
+1. Checkout PR head from the target repo.
+2. Load `deploy/targets/<id>.yaml` (`load_target_config.py`).
+3. Optional LLM prepare (`llm_fuzz_prepare.py`) — seeds + `.dict` (fail-open).
+4. Timed fuzz via `run_pr_fuzz_job.sh` / `run_timed_fuzz.sh` (`FUZZ_SECONDS`).
+5. Ingest into `LOCAL_GCS_ROOT` (`ingest_build.sh`).
+6. Optional LLM triage → `triage.md` (fail-open).
+7. Comment via `post_pr_comments.py`.
+8. Optional enqueue deep job (`LLM_FUZZ_BG_ENABLED=1`) for `llm-fuzz-worker`.
+
+Do not enable App + thin workflow on the same repo (duplicate jobs/comments). Continuous background fuzzing still happens via `cf-server` / `cf-bot` after ingest.
 
 ## LLM-assisted seeds, triage, and background worker
 
-LLM assist is **glue only** (not upstream ClusterFuzz). Default LLM endpoint is **local Ollama** (`http://127.0.0.1:11434`, model `Qwen2.5-Coder:1.5b`). The `gha-runner` service uses `network_mode: host` so PR jobs can reach loopback Ollama (and OTLP).
+LLM assist is **glue only** (not upstream ClusterFuzz). Shared client: `scripts/llm_chat.py`. Switch providers with **`LLM_FUZZ_PROVIDER`**:
+
+| Provider | Default base | Default model | Auth |
+| --- | --- | --- | --- |
+| `ollama` (default) | `http://127.0.0.1:11434` | `Qwen2.5-Coder:1.5b` | none |
+| `openrouter` | `https://openrouter.ai/api/v1` | `qwen/qwen-2.5-coder-7b-instruct` | `OPENROUTER_API_KEY` |
+
+Explicit `LLM_FUZZ_MODEL` / `LLM_FUZZ_BASE_URL` override the defaults. Target YAML may set `llm.provider`. The `gha-runner` service uses `network_mode: host` so PR jobs can reach loopback Ollama (and OTLP); OpenRouter is outbound HTTPS.
 
 | Piece | Role |
 | --- | --- |
+| `scripts/llm_chat.py` | Shared Ollama / OpenRouter chat client |
 | `scripts/llm_fuzz_prepare.py` | Pre-fuzz seeds + libFuzzer `-dict=` |
 | `scripts/llm_crash_triage.py` | Short root-cause markdown for the PR review |
 | `scripts/llm_fuzz_enqueue.py` | After the PR job, queue a deep job |
 | `scripts/llm_fuzz_worker.py` | Longer seed batch + timed fuzz; follow-up comment on **new** crash hashes |
 | `docker-compose.llm-worker.yml` | Optional Compose service for the worker |
 
-From the **gha-runner** / **llm-fuzz-worker** (both host-networked), Ollama is `http://127.0.0.1:11434`.
-
 ```bash
+# OpenRouter example (runner.env / github-app.env / llm-worker.env)
+LLM_FUZZ_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...
+
 cp llm-worker.env.example llm-worker.env   # optional GITHUB_TOKEN for follow-ups
 docker compose -f docker-compose.yml -f docker-compose.llm-worker.yml up -d llm-fuzz-worker
 ```
 
-Repo vars: `LLM_FUZZ_ENABLED`, `LLM_FUZZ_MODEL`, `LLM_FUZZ_BASE_URL`, `LLM_FUZZ_BG_ENABLED`. Prep/triage **fail open** if Ollama is down so classic mutation still runs.
+Repo / env knobs: `LLM_FUZZ_ENABLED`, `LLM_FUZZ_PROVIDER`, `LLM_FUZZ_MODEL`, `LLM_FUZZ_BASE_URL`, `LLM_FUZZ_BG_ENABLED`, `OPENROUTER_API_KEY`. Prep/triage **fail open** if the provider is down or the OpenRouter key is missing so classic mutation still runs.
 
 **Not** used: LLM inside the mutation hot loop (too slow for the 60s SLA).
 
@@ -121,9 +140,8 @@ Store registration secrets in the host environment or a gitignored `deploy/.env`
 
 ## Operational notes
 
-- Keep **`gha-runner` up** whenever you expect PR fuzzing.
-- Label drift breaks scheduling: workflow `runs-on` and runner labels must stay aligned.
-- Do not point these workflows at GitHub-hosted runners and expect `local_gcs` ingest or the same sanitizer environment.
-- For org-wide use, prefer GitHub **runner groups** and explicit repository allow-lists (future / optional hardening).
+- **App path:** keep **`cf-github-app` + host cloudflared** for account-wide PR fuzzing ([github-app.md](github-app.md)). Farm repo `WiredMind2/clusterfuzz` uses the App only (no same-repo `fuzz-pr.yml`) to avoid duplicate comments.
+- **Actions path:** keep **`gha-runner` up** for target repos that still use thin `repository_dispatch` callers.
+- Diff-aware App jobs skip when the PR does not touch harness/`demo-target` paths; demo `BOOM` crashes are labeled as expected smoke.
 
-See also: [architecture.md](architecture.md) (data flow), [setup.md](setup.md) (registration steps), [multi-repo.md](multi-repo.md) (`cf_enable_repo.sh`), [limitations.md](limitations.md) (GitHub gaps).
+See also: [github-app.md](github-app.md) (Sourcery-style App), [architecture.md](architecture.md) (data flow), [setup.md](setup.md) (registration steps), [multi-repo.md](multi-repo.md) (`cf_enable_repo.sh`), [limitations.md](limitations.md) (GitHub gaps).

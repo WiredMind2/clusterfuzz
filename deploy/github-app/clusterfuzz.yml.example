@@ -1,0 +1,3 @@
+# Example in-repo opt-out for the ClusterFuzz GitHub App.
+# Commit as `.clusterfuzz.yml` at the repository root.
+enabled: false

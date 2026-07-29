@@ -1,0 +1,21 @@
+# Example cloudflared config for fuzzing.tetrazero.com → local cf-github-app.
+# Prefer TUNNEL_TOKEN in cloudflared.env (Zero Trust dashboard) when possible.
+# If using a config file instead:
+#   1. Create a tunnel in Cloudflare Zero Trust
+#   2. Copy credentials JSON to deploy/github-app/credentials.json (gitignored)
+#   3. Set tunnel UUID below and mount this file in Compose
+#
+# tunnel: REPLACE_WITH_TUNNEL_UUID
+# credentials-file: /etc/cloudflared/credentials.json
+#
+# ingress:
+#   - hostname: fuzzing.tetrazero.com
+#     service: http://127.0.0.1:9310
+#   - service: http_status:404
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/credentials.json
+ingress:
+  - hostname: fuzzing.tetrazero.com
+    service: http://127.0.0.1:9310
+  - service: http_status:404

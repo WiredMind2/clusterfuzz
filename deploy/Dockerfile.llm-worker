@@ -1,0 +1,16 @@
+# Background LLM deep-fuzz worker (no apt on every start).
+# Build context: deploy/
+FROM python:3.12-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    LLM_FUZZ_DEPLOY_DIR=/opt/clusterfuzz/deploy
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      unzip \
+      ca-certificates \
+      git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/clusterfuzz/deploy
+CMD ["python3", "/opt/clusterfuzz/deploy/scripts/llm_fuzz_worker.py"]

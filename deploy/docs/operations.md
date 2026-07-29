@@ -6,7 +6,7 @@ Bootstrap / verification snapshot: [`../BOOTSTRAP_STATUS.md`](../BOOTSTRAP_STATU
 
 ## Start / stop
 
-Work from `deploy/`. Main stack is `docker-compose.yml` only (`cf-server`, `cf-bot`). The runner is an **override** file.
+Work from `deploy/`. Main stack is `docker-compose.yml` (`cf-server`, `cf-bot`). GitHub App and runner are **override** files. Prefer the App for PR fuzz; runner is Actions fallback only.
 
 ```bash
 cd /home/william/Documents/clusterfuzz/deploy
@@ -14,19 +14,19 @@ cd /home/william/Documents/clusterfuzz/deploy
 # Start continuous farm (host networking)
 docker compose up -d
 
-# Start individually
-docker compose up -d cf-server
-docker compose up -d cf-bot
+# Preferred PR path: GitHub App (host cloudflared already routes fuzzing.tetrazero.com)
+docker compose -f docker-compose.yml -f docker-compose.github-app.yml \
+  --env-file github-app.env up -d cf-github-app
 
-# Runner (needs runner.env) — override compose
+# Optional LLM background worker
+docker compose -f docker-compose.yml -f docker-compose.llm-worker.yml up -d llm-fuzz-worker
+
+# Actions fallback runner (needs runner.env)
 docker compose -f docker-compose.yml -f docker-compose.runner.yml --env-file runner.env up -d gha-runner
 
 # Stop farm (data/ retained)
 docker compose stop
 docker compose down
-
-# Stop runner as well
-docker compose -f docker-compose.yml -f docker-compose.runner.yml --env-file runner.env stop gha-runner
 ```
 
 ### First boot vs later boots
@@ -108,9 +108,16 @@ cd /home/william/Documents/clusterfuzz/deploy/demo-target
 
 Prebuilt zips may already be under `demo-target/out/`.
 
-### PR path
+### PR path (preferred: GitHub App)
 
-Builds and timed fuzz run on `gha-runner` via `fuzz-pr.yml`. Artifacts should still be ingested into `local_gcs`. PR comments come from `post_pr_comments.py`.
+1. Webhook → `cf-github-app` (`127.0.0.1:9310` via `fuzzing.tetrazero.com`).
+2. Worker runs `scripts/run_pr_fuzz_job.sh` (timed fuzz).
+3. `post_pr_comments.py` posts review comments as the App.
+4. Optional ingest into `local_gcs` for continuous-farm triage.
+
+**Actions fallback:** thin `fuzz-pr.yml` → `repository_dispatch` → `gha-runner` → reusable workflow. Do not leave both paths enabled on the same repo (duplicate comments).
+
+Health probe: `./scripts/cf_farm_health.sh`.
 
 ## Backup
 
@@ -160,8 +167,13 @@ docker compose down
 
 ## Health checklist
 
+```bash
+./scripts/cf_farm_health.sh
+```
+
 1. `docker compose ps` → `cf-server` **healthy**, `cf-bot` **Up**
 2. `curl -fsS http://127.0.0.1:9300/` → 200
-3. `data/local_gcs` populated; bot log past platform init
-4. (If using CI) runner **Idle** in GitHub with correct labels
-5. Demo or real job produces a testcase in the UI
+3. `curl -fsS http://127.0.0.1:9310/healthz` and `https://fuzzing.tetrazero.com/healthz` → 200
+4. `data/local_gcs` populated; bot log past platform init
+5. (If using Actions fallback) runner **Idle** in GitHub with correct labels
+6. Demo or real job produces a testcase in the UI / PR comments

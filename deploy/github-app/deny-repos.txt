@@ -1,0 +1,9 @@
+# Farm-side deny list for the ClusterFuzz GitHub App.
+# One OWNER/REPO per line (case-insensitive). Lines starting with # are ignored.
+# Skipped before checkout — no PR comment is posted when denied here.
+#
+# Prefer GitHub App installation repo access for Sourcery-style disable;
+# use this file for a quick mute without opening GitHub settings.
+#
+# Examples:
+# WiredMind2/some-noisy-repo

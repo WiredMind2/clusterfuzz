@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scaffold a minimal fuzz harness (LLM via Ollama, fail-open to static templates).
+"""Scaffold a minimal fuzz harness (LLM via Ollama/OpenRouter, fail-open to static templates).
 
 Usage:
   llm_scaffold_harness.py --engine atheris|libfuzzer --out-dir DIR [--repo-root DIR]
@@ -10,13 +10,17 @@ Writes files under out-dir (typically a temp tree that becomes the enablement PR
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
 import urllib.error
-import urllib.request
 from pathlib import Path
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+from llm_chat import chat, resolve_config  # noqa: E402
 
 
 ATHERIS_TEMPLATE = '''\
@@ -95,37 +99,6 @@ def log(msg: str) -> None:
     print(f"==> llm_scaffold: {msg}", flush=True)
 
 
-def ollama_chat(base_url: str, model: str, prompt: str, timeout_s: float) -> str:
-    url = base_url.rstrip("/") + "/api/chat"
-    body = {
-        "model": model,
-        "stream": False,
-        "options": {"temperature": 0.2},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You write minimal fuzz harnesses. Reply with a single fenced code block only, "
-                    "no explanation. Prefer safe, side-effect-free entrypoints."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "clusterfuzz-llm-scaffold"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    content = (data.get("message") or {}).get("content") or ""
-    if not content.strip():
-        raise ValueError("empty scaffold response")
-    return content
-
-
 def extract_code(raw: str) -> str:
     fence = re.search(r"```(?:python|py|c\+\+|cpp|cc)?\s*([\s\S]*?)```", raw)
     if fence:
@@ -183,9 +156,6 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     repo_root = args.repo_root.resolve()
 
-    base_url = env("LLM_FUZZ_BASE_URL") or "http://127.0.0.1:11434"
-    model = env("LLM_FUZZ_MODEL") or "Qwen2.5-Coder:1.5b"
-    timeout_s = float(env("LLM_FUZZ_TIMEOUT_S") or "45")
     use_llm = env("LLM_FUZZ_ENABLED", "1") in ("1", "true", "TRUE", "yes", "YES")
 
     body: str | None = None
@@ -204,7 +174,22 @@ def main(argv: list[str] | None = None) -> int:
                 f"Repo hints:\n{hints}"
             )
         try:
-            raw = ollama_chat(base_url, model, prompt, timeout_s)
+            cfg = resolve_config()
+            log(f"provider={cfg.provider} model={cfg.model}")
+            raw = chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You write minimal fuzz harnesses. Reply with a single fenced code block only, "
+                            "no explanation. Prefer safe, side-effect-free entrypoints."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+                cfg=cfg,
+            )
             body = extract_code(raw)
             if args.engine == "atheris" and "atheris" not in body:
                 raise ValueError("LLM output missing atheris")

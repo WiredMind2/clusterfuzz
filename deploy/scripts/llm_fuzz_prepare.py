@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate libFuzzer seeds + dictionary via local Ollama (fail-open).
+"""Generate libFuzzer seeds + dictionary via LLM (fail-open).
 
 Writes:
   $ARTIFACT_DIR/llm_seeds/   — one file per seed
@@ -7,10 +7,9 @@ Writes:
   $ARTIFACT_DIR/llm_prepare.env — CORPUS_DIR / EXTRA_FUZZ_ARGS for sourcing
 
 Env:
-  LLM_FUZZ_ENABLED       — "1" to call Ollama (default: treat as enabled if unset when invoked)
-  LLM_FUZZ_BASE_URL      — default http://127.0.0.1:11434
-  LLM_FUZZ_MODEL         — default Qwen2.5-Coder:1.5b
-  LLM_FUZZ_TIMEOUT_S     — HTTP timeout (default 45)
+  LLM_FUZZ_ENABLED       — "1" to call LLM (default: treat as enabled if unset when invoked)
+  LLM_FUZZ_PROVIDER      — ollama | openrouter (default ollama); see llm_chat.py
+  LLM_FUZZ_BASE_URL / LLM_FUZZ_MODEL / LLM_FUZZ_TIMEOUT_S / OPENROUTER_API_KEY
   LLM_FUZZ_MAX_SEEDS     — default 32
   LLM_FUZZ_MAX_TOKENS    — dict tokens (default 64)
   LLM_FUZZ_MAX_SEED_BYTES — reject larger seeds (default 4096)
@@ -28,8 +27,13 @@ import os
 import re
 import sys
 import urllib.error
-import urllib.request
 from pathlib import Path
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+from llm_chat import chat, provider_label, resolve_config  # noqa: E402
 
 
 def env(name: str, default: str | None = None) -> str | None:
@@ -174,40 +178,6 @@ def normalize_payload(payload: dict, max_seeds: int, max_tokens: int, max_seed_b
     return seeds, tokens
 
 
-def ollama_chat(base_url: str, model: str, prompt: str, timeout_s: float) -> str:
-    url = base_url.rstrip("/") + "/api/chat"
-    body = {
-        "model": model,
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.2},
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You help coverage-guided fuzzers. Reply with JSON only, no prose. "
-                    'Schema: {"seeds":[<string or {"text":...} or {"hex":...}>],'
-                    '"dict_tokens":[<short string tokens>]}'
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "clusterfuzz-llm-fuzz-prepare"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    msg = data.get("message") or {}
-    content = msg.get("content")
-    if not content:
-        raise ValueError(f"empty Ollama response: {data!r}"[:500])
-    return content
-
-
 def build_prompt(source_text: str, target_id: str, prior_crashes: list[str], max_seeds: int, max_tokens: int) -> str:
     prior = ""
     if prior_crashes:
@@ -262,9 +232,6 @@ def main(argv: list[str] | None = None) -> int:
     max_seeds = int(env("LLM_FUZZ_MAX_SEEDS") or "32")
     max_tokens = int(env("LLM_FUZZ_MAX_TOKENS") or "64")
     max_seed_bytes = int(env("LLM_FUZZ_MAX_SEED_BYTES") or "4096")
-    timeout_s = float(env("LLM_FUZZ_TIMEOUT_S") or "45")
-    base_url = env("LLM_FUZZ_BASE_URL") or "http://127.0.0.1:11434"
-    model = env("LLM_FUZZ_MODEL") or "Qwen2.5-Coder:1.5b"
     target_id = env("TARGET_ID") or "unknown"
 
     prior_crashes: list[str] = []
@@ -282,11 +249,28 @@ def main(argv: list[str] | None = None) -> int:
     prompt = build_prompt(source_text, target_id, prior_crashes, max_seeds, max_tokens)
 
     try:
-        raw = ollama_chat(base_url, model, prompt, timeout_s)
+        cfg = resolve_config()
+        log(f"provider={cfg.provider} model={cfg.model}")
+        raw = chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You help coverage-guided fuzzers. Reply with JSON only, no prose. "
+                        'Schema: {"seeds":[<string or {"text":...} or {"hex":...}>],'
+                        '"dict_tokens":[<short string tokens>]}'
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            json_mode=True,
+            temperature=0.2,
+            cfg=cfg,
+        )
         payload = parse_llm_json(raw)
         seeds, tokens = normalize_payload(payload, max_seeds, max_tokens, max_seed_bytes)
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, json.JSONDecodeError, OSError) as exc:
-        log(f"Ollama failed ({exc!r}) — fail-open with empty outputs")
+        log(f"{provider_label()} failed ({exc!r}) — fail-open with empty outputs")
         write_outputs(artifact_dir, [], [])
         _maybe_github_env(artifact_dir, args.github_env)
         return 0

@@ -1,0 +1,48 @@
+# Sourcery-style GitHub App for fuzzing.tetrazero.com
+#
+# Start App only; public URL via host cloudflared (TetrazeroDashboard):
+#   docker compose -f docker-compose.yml -f docker-compose.github-app.yml \
+#     --env-file github-app.env up -d --build cf-github-app
+#
+# Webhook URL for the GitHub App:
+#   https://fuzzing.tetrazero.com/github/webhooks
+#
+# Host cloudflared must route fuzzing.tetrazero.com → http://127.0.0.1:9310
+# (see TetrazeroDashboard cloudflared config — no Compose tunnel service).
+
+services:
+  cf-github-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.github-app
+    image: clusterfuzz-github-app:local
+    container_name: clusterfuzz-cf-github-app
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - github-app.env
+    environment:
+      DEPLOY_DIR: /opt/clusterfuzz/deploy
+      GITHUB_APP_BIND: ${GITHUB_APP_BIND:-127.0.0.1}
+      GITHUB_APP_PORT: ${GITHUB_APP_PORT:-9310}
+      GITHUB_APP_QUEUE_DIR: /data/github_app_queue
+      GITHUB_APP_WORK_DIR: /data/github_app_work
+      GITHUB_APP_DENY_LIST: /opt/clusterfuzz/deploy/github-app/deny-repos.txt
+      GITHUB_APP_PRIVATE_KEY_PATH: ${GITHUB_APP_PRIVATE_KEY_PATH:-/opt/clusterfuzz/deploy/github-app/private-key.pem}
+      LOCAL_GCS_ROOT: /data/local_gcs
+      CLUSTERFUZZ_UI_URL: ${CLUSTERFUZZ_UI_URL:-http://127.0.0.1:9300}
+      LLM_FUZZ_PROVIDER: ${LLM_FUZZ_PROVIDER:-ollama}
+      LLM_FUZZ_BASE_URL: ${LLM_FUZZ_BASE_URL:-http://127.0.0.1:11434}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../data:/data
+      - .:/opt/clusterfuzz/deploy:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9310/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    cpus: 2.0
+    mem_limit: 4g

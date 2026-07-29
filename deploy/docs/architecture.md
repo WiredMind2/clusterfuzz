@@ -8,30 +8,38 @@ This stack runs **official ClusterFuzz in local mode** on a single Docker host, 
 flowchart TB
   subgraph github [GitHub]
     PR[Pull request]
-    WF[Workflow runs-on self-hosted]
+    App[GitHub App webhooks]
+    ThinWF[Thin dispatch caller optional]
   end
-  subgraph host [This server - Docker Compose]
-    Runner[gha-runner]
+  subgraph host [This server]
+    Tunnel[host cloudflared fuzzing.tetrazero.com]
+    GHApp[cf-github-app :9310]
+    Runner[gha-runner Actions fallback]
     Server[cf-server butler run_server]
     Bot[cf-bot butler run_bot]
     GCS[volume local_gcs]
-    Demo[demo-builder optional]
   end
-  PR --> WF
-  WF --> Runner
-  Runner -->|build ASan zip + kick fuzz| Bot
-  Runner -->|or upload build| GCS
+  PR --> App
+  App --> Tunnel
+  Tunnel --> GHApp
+  GHApp -->|timed fuzz + comments| PR
+  PR -.-> ThinWF
+  ThinWF -.->|repository_dispatch| Runner
+  Runner -.->|timed fuzz + comments| PR
+  Runner -.->|ingest| GCS
+  GHApp -->|ingest| GCS
   Server --> GCS
   Bot --> GCS
   Bot -->|crashes| Server
-  Runner -->|gh api review comments| PR
 ```
 
 | Service | Image / entrypoint | Responsibility |
 | --- | --- | --- |
 | `cf-server` | `clusterfuzz-server:local` → `butler.py run_server` | Local web UI (**host** `127.0.0.1:9300`), task scheduling; **`network_mode: host`** |
 | `cf-bot` | `clusterfuzz-bot:local` → `butler.py run_bot` | Pulls fuzz tasks, runs fuzzers; same host network + shared `/data` |
-| `gha-runner` | Override `docker-compose.runner.yml` | Self-hosted CI worker; builds targets, timed PR fuzz, posts comments |
+| `cf-github-app` | Override `docker-compose.github-app.yml` | Sourcery-style webhooks + timed PR fuzz + App comments (`127.0.0.1:9310`) |
+| Host `cloudflared` | TetrazeroDashboard (not Compose) | TLS for `fuzzing.tetrazero.com` → `:9310` |
+| `gha-runner` | Override `docker-compose.runner.yml` | Self-hosted CI worker (**Actions fallback** only) |
 | Shared volume | Host `data/` → `/data` (`deploy/data` → `../data` symlink) | Filesystem GCS at `/data/local_gcs` |
 
 Optional: a one-shot **demo builder** (or script under `deploy/demo-target/`) produces a revisioned zip and drops it into `local_gcs` so continuous bots have something to fuzz before a real repo is wired.
@@ -49,30 +57,32 @@ This path is entirely **upstream local-mode ClusterFuzz**. No GitHub is required
 
 ### PR-triggered fuzzing (commentable path)
 
-Chosen design: **synchronous timed fuzz on the self-hosted runner**, so findings map cleanly to a PR.
+**Preferred:** GitHub App webhooks → **host** `cloudflared` (`fuzzing.tetrazero.com`) → `cf-github-app` (`127.0.0.1:9310`) → timed fuzz → PR comments as the App. See [github-app.md](github-app.md).
 
-1. A pull request opens or updates → GitHub Actions workflow `fuzz-pr.yml` is queued.
-2. Job runs on labels `[self-hosted, clusterfuzz-local]` → lands on `gha-runner` on this host.
-3. Runner builds **ASan** (or other configured) libFuzzer binaries, runs a **time-boxed** fuzz session using the same toolchain / image family as the bots.
-4. Crashes and builds are also **ingested into `local_gcs`** so `cf-server` + `cf-bot` continue background fuzzing and UI triage.
-5. `deploy/scripts/post_pr_comments.py` posts **PR review comments** via the GitHub API (stack excerpts + links into the local UI when available).
+**Alternate (Actions fallback):** thin caller → `repository_dispatch` → `gha-runner` → reusable workflow. Enable only with `cf_enable_repo.sh --with-actions`.
 
-**Important:** The async ClusterFuzz job queue alone is **not** the source of truth for PR comments. Timed runner fuzz is, so comment latency and mapping stay predictable.
+1. A pull request opens or updates → App webhook **or** (fallback) thin `fuzz-pr.yml` dispatch.
+2. App worker / runner builds and runs a **time-boxed** fuzz session.
+3. Crashes and builds may be **ingested into `local_gcs`** so `cf-server` + `cf-bot` continue background fuzzing.
+4. `deploy/scripts/post_pr_comments.py` posts **PR review comments** via the GitHub API (installation token or Actions/PAT).
+
+**Important:** The async ClusterFuzz job queue alone is **not** the source of truth for PR comments. Timed fuzz is, so comment latency and mapping stay predictable.
 
 ```mermaid
 sequenceDiagram
   participant Dev as Developer
   participant GH as GitHub
-  participant R as gha-runner
+  participant Tunnel as host_cloudflared
+  participant App as cf-github-app
   participant GCS as local_gcs
-  participant CF as cf-server / cf-bot
+  participant CF as cf-server_bot
 
   Dev->>GH: Open / update PR
-  GH->>R: Workflow job (self-hosted)
-  R->>R: Build ASan fuzzers
-  R->>R: Timed local fuzz
-  R->>GCS: Ingest build / crashes
-  R->>GH: PR review comments (API)
+  GH->>Tunnel: App webhook
+  Tunnel->>App: POST /github/webhooks
+  App->>App: Timed local fuzz
+  App->>GCS: Ingest build / crashes
+  App->>GH: PR review comments as App
   GCS->>CF: Continuous farm picks up builds
   CF->>CF: Background fuzz + UI triage
 ```
@@ -85,7 +95,8 @@ sequenceDiagram
 | Filesystem “GCS” | Yes (`local_gcs` / `--storage-path`) | Bind-mount under `data/` |
 | Official base images (`docker/`, `./build.sh`) | Yes | `build_upstream_images.sh` invokes them |
 | App Engine / Firebase / real GCS / Datastore / Pub/Sub / BQ | Production only — **not used** | — |
-| GitHub Actions triggers | No | `gha-runner` + `workflows/fuzz-pr.yml` + `docker-compose.runner.yml` |
+| GitHub App PR path | No | `cf-github-app` + host cloudflared + `run_pr_fuzz_job.sh` |
+| Actions fallback | No | `gha-runner` + caller templates + farm reusable/dispatch |
 | Timed PR fuzz / ingest | No | `scripts/run_timed_fuzz.sh`, `scripts/ingest_build.sh` |
 | PR review comments | No | `scripts/post_pr_comments.py` |
 | Demo C++ overflow target | No | `demo-target/` |
@@ -106,11 +117,12 @@ On this host the shared root is repo-root **`data/`** (compose `../data:/data`; 
 | --- | --- |
 | `127.0.0.1:9300` | ClusterFuzz web UI (host network; remapped from upstream 9000 via `apply_local_ports.sh`) |
 | `127.0.0.1:9308` | Local GCS emulator / uploads (remapped from 9008) |
+| `127.0.0.1:9310` | GitHub App webhook listener (behind host cloudflared) |
 
 `cf-server` and `cf-bot` **must** share the host network namespace so DATASTORE/PUBSUB/GCS emulator hosts on localhost resolve. Host port conflicts (e.g. another app on `:9300`) block startup — see `BOOTSTRAP_STATUS.md` and [operations.md](operations.md).
 
 ## Scaling model
 
 - **Bots:** scale `cf-bot` replicas on the same host/shared volume when CPU/RAM allow.
-- **Runners:** one labeled self-hosted runner is the default; org-wide runner groups are optional follow-up.
+- **Runners:** one labeled self-hosted runner is the default Actions fallback; org-wide runner groups are optional follow-up.
 - **No GCE autoscaling** — there is no cloud bot pool.

@@ -33,7 +33,7 @@ Confirm in GitHub: repo Settings → Actions → Runners — **Idle**, labels in
 
 ## Notes
 
-- `network_mode: host` on the runner so jobs reach loopback Ollama (`:11434`) and OTLP.
+- `network_mode: host` on the runner so jobs reach loopback Ollama (`:11434`) and OTLP; OpenRouter uses outbound HTTPS when `LLM_FUZZ_PROVIDER=openrouter`.
 - `docker.sock` is mounted so jobs can build sibling containers.
 - `../data` → `/data`; deploy tree → `/opt/clusterfuzz/deploy:ro`.
 - Never commit `runner.env` or tokens.

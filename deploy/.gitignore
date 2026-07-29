@@ -2,3 +2,6 @@
 runner.env
 runner.env.tmp
 llm-worker.env
+github-app.env
+github-app/private-key.pem
+github-app/*.pem

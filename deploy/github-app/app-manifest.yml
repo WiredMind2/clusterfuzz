@@ -1,0 +1,24 @@
+# GitHub App manifest — paste into:
+#   https://github.com/settings/apps/new?state=clusterfuzz
+# Or: Settings → Developer settings → GitHub Apps → New GitHub App
+# (Advanced: "Create from manifest" if offered.)
+#
+# After creation: generate a private key, set webhook secret, install on
+# WiredMind2 with "All repositories". See deploy/docs/github-app.md.
+
+name: ClusterFuzz Local
+url: https://github.com/WiredMind2/clusterfuzz
+hook_attributes:
+  url: https://fuzzing.tetrazero.com/github/webhooks
+  active: true
+redirect_url: https://github.com/WiredMind2/clusterfuzz
+description: >
+  Local ClusterFuzz PR fuzzing for WiredMind2 — timed fuzz on PRs,
+  review comments when crashes are found (Sourcery-style).
+public: false
+default_events:
+  - pull_request
+default_permissions:
+  contents: read
+  metadata: read
+  pull_requests: write

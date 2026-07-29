@@ -12,7 +12,7 @@ Live status after bootstrap: [`../BOOTSTRAP_STATUS.md`](../BOOTSTRAP_STATUS.md) 
 | Docker Compose | `docker compose` v2 plugin |
 | Disk | Enough for upstream checkout, images, corpora, and builds (plan tens of GB for serious use; demo needs far less) |
 | CPU / RAM | Continuous bots + runner builds compete; size for your target |
-| **Host ports free** | **`9300`** (UI) and **`9308`** (local GCS emulator), plus `9302/9304/9306/9309` — remapped from upstream `900x` by `apply_local_ports.sh` at image build; stack uses **`network_mode: host`** |
+| **Host ports free** | **`9300`** (UI) and **`9308`** (local GCS emulator), plus `9302/9304/9306/9309`; App webhook **`9310`** (localhost only) — remapped CF from upstream `900x` by `apply_local_ports.sh`; stack uses **`network_mode: host`** |
 | Git | To clone / update `upstream/` |
 
 No host-level Python 3.11, Java, or ClusterFuzz `install_deps` is required on the bare metal for the compose path.
@@ -25,10 +25,12 @@ Upstream local mode defaults to `:9000` (UI) / `:9008` (GCS). This deploy patche
 
 | Secret | Used for |
 | --- | --- |
-| GitHub PAT or registration token | Register `gha-runner` to a repo or org |
-| Token with `pull-requests: write` (workflow `GITHUB_TOKEN` or PAT) | Post PR review comments from `post_pr_comments.py` |
+| GitHub App ID + private key + webhook secret | Sourcery-style App ([github-app.md](github-app.md)); `github-app.env` |
+| Host cloudflared | Already managed via TetrazeroDashboard for `fuzzing.tetrazero.com` → `:9310` |
+| GitHub PAT or registration token | Register `gha-runner` (optional Actions fallback) |
+| Token with `pull-requests: write` | Actions `post_pr_comments.py` when not using the App |
 
-Do **not** commit tokens. Use `deploy/runner.env` (gitignored) from `runner.env.example`.
+Do **not** commit tokens. Use gitignored `deploy/github-app.env`, `deploy/runner.env`, `deploy/llm-worker.env`.
 
 ## Repository layout
 
@@ -41,21 +43,24 @@ clusterfuzz/
     local_gcs/
     bot/
     runner/
+    github_app_queue/
   deploy/
     docker-compose.yml              # cf-server + cf-bot (network_mode: host)
-    docker-compose.runner.yml       # gha-runner override
-    Dockerfile.server|.bot|.runner
+    docker-compose.github-app.yml   # cf-github-app only (host tunnel)
+    docker-compose.runner.yml       # gha-runner override (Actions fallback)
+    docker-compose.llm-worker.yml   # optional llm-fuzz-worker
+    Dockerfile.server|.bot|.runner|.github-app|.llm-worker
+    patches/                        # local_butler_ports + bot copytree
+    targets/                        # per-repo farm YAML registry
+    github-app/                     # deny list, manifest, private key
     runner.env.example
+    github-app.env.example
     GITHUB_RUNNER.md
     BOOTSTRAP_STATUS.md
-    scripts/
-      bootstrap.sh
-      build_upstream_images.sh      # optional official docker/ bases
-      run_timed_fuzz.sh
-      ingest_build.sh
-      post_pr_comments.py
+    scripts/                        # bootstrap, App, PR fuzz, LLM, enable
     demo-target/
-    workflows/fuzz-pr.yml
+    workflows/                      # fuzz-pr-caller*.yml.template
+    tests/
     data -> ../data                 # symlink for runner/ingest
     docs/
 ```
@@ -169,11 +174,11 @@ cd deploy/demo-target
 ../scripts/ingest_build.sh   # into data/local_gcs (via deploy/data symlink)
 ```
 
-Built artifacts already exist under `deploy/demo-target/out/` from prior runs.
+`out/` is gitignored; rebuild before ingest if missing.
 
-## 7. Register the self-hosted runner
+## 7. Register the self-hosted runner (Actions fallback)
 
-See `deploy/GITHUB_RUNNER.md`.
+See `deploy/GITHUB_RUNNER.md`. Only needed if you use `cf_enable_repo.sh --with-actions`.
 
 ```bash
 cd deploy
@@ -195,10 +200,23 @@ runs-on: [self-hosted, clusterfuzz-local]
 
 ## 8. Wiring a real repository
 
-1. Copy `deploy/workflows/fuzz-pr.yml` into the target repo as `.github/workflows/fuzz-pr.yml` (replace the demo build step).
-2. Match `runs-on` labels to the registered runner.
-3. Ensure `permissions.pull-requests: write`.
-4. Open a test PR; confirm the job lands here, fuzz runs, and comments appear.
+**Preferred (App):** install the GitHub App on the account, then:
+
+```bash
+./deploy/scripts/cf_enable_repo.sh WiredMind2/MyProject
+# optional: --farm-pr to open a PR for deploy/targets/<slug>.yaml
+```
+
+See [github-app.md](github-app.md) and [multi-repo.md](multi-repo.md).
+
+**Actions fallback only:**
+
+```bash
+CLUSTERFUZZ_DISPATCH_TOKEN=ghp_… \
+  ./deploy/scripts/cf_enable_repo.sh WiredMind2/MyProject --with-actions
+```
+
+That copies `fuzz-pr-caller.yml.template` → `.github/workflows/fuzz-pr.yml` and sets Actions vars. Do not leave App + thin workflow both enabled on the same repo.
 
 ## Config defaults (live)
 

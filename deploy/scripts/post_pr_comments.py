@@ -2,21 +2,18 @@
 """Post ClusterFuzz timed-fuzz crash findings as GitHub PR review comments.
 
 Reads crash artifacts (from run_timed_fuzz.sh or run_timed_atheris.sh) and
-creates a PR review via the GitHub API. Intended for the self-hosted fuzz-pr
-workflow (libFuzzer or Atheris).
+creates a PR review via the GitHub API (GitHub App or Actions).
 
 Required env:
-  GITHUB_TOKEN   — PAT or Actions token with pull-requests: write
-  GITHUB_REPOSITORY — owner/repo (set automatically in Actions)
+  GITHUB_TOKEN   — PAT, App installation token, or Actions token
+  GITHUB_REPOSITORY — owner/repo
   PR_NUMBER      — pull request number (or GITHUB_REF / event payload)
 
 Optional env:
-  ARTIFACT_DIR   — directory with crashes/ and fuzz.log (default: ./fuzz-artifacts)
-  CLUSTERFUZZ_UI_URL — base URL for local CF UI links (default: http://localhost:9300)
-  GITHUB_API_URL — API base (default: https://api.github.com)
-  COMMENT_MAX_CRASHES — max crash files to include (default: 10)
-  REVIEW_TITLE   — override review heading
-  DRY_RUN        — if "1", print payload and exit without posting
+  ARTIFACT_DIR, CLUSTERFUZZ_UI_URL, GITHUB_API_URL, COMMENT_MAX_CRASHES
+  REVIEW_TITLE, DRY_RUN
+  COMMENT_SOURCE — github-app | actions (default: actions if GITHUB_ACTIONS else github-app)
+  SMOKE_DEMO — 1 for expected demo/BOOM labeling
 """
 
 from __future__ import annotations
@@ -27,6 +24,13 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+from asan_helpers import is_demo_boom_crash, parse_asan  # noqa: E402
+from llm_chat import provider_label  # noqa: E402
 
 
 def env(name: str, default: str | None = None) -> str | None:
@@ -82,7 +86,6 @@ def collect_crashes(artifact_dir: Path, limit: int) -> list[tuple[str, bytes]]:
             for p in crash_dir.iterdir()
             if p.is_file() and not p.name.startswith(".")
         )
-    # Fallback: artifact_prefix files in artifact_dir root
     if not files:
         files = sorted(
             p
@@ -109,7 +112,6 @@ def extract_asan_excerpt(log_text: str, max_lines: int = 40) -> str:
         if "SUMMARY:" in line and start is None:
             start = max(0, i - 15)
     if start is None:
-        # Last non-empty chunk
         nonempty = [ln for ln in lines if ln.strip()]
         return "\n".join(nonempty[-max_lines:])
     return "\n".join(lines[start : start + max_lines])
@@ -125,54 +127,127 @@ def hex_preview(data: bytes, n: int = 64) -> str:
     return f"hex={hx} ascii={ascii_approx!r} len={len(data)}"
 
 
+def comment_source() -> str:
+    explicit = (env("COMMENT_SOURCE") or "").strip().lower()
+    if explicit in ("github-app", "app"):
+        return "GitHub App"
+    if explicit in ("actions", "gha"):
+        return "GitHub Actions"
+    if env("GITHUB_ACTIONS") == "true":
+        return "GitHub Actions"
+    return "GitHub App"
+
+
+def split_triage(triage_md: str) -> tuple[str, bool]:
+    """Return (body, is_llm). LLM sections are collapsed by the caller."""
+    text = triage_md.strip()
+    if not text:
+        return "", False
+    is_llm = text.lstrip().startswith("## LLM triage")
+    return text, is_llm
+
+
+def triage_summary_label(triage_md: str) -> str:
+    """Prefer label embedded in triage.md header; else current provider_label()."""
+    text = triage_md.lstrip()
+    if text.startswith("## LLM triage ("):
+        end = text.find(")", len("## LLM triage ("))
+        if end > 0:
+            return text[len("## LLM triage (") : end]
+    try:
+        return provider_label()
+    except ValueError:
+        return "LLM"
+
+
 def build_review_body(
     crashes: list[tuple[str, bytes]],
     log_excerpt: str,
+    log_text: str,
     ui_url: str,
     repo: str,
     pr_number: str,
     triage_md: str = "",
     title: str | None = None,
+    smoke_demo: bool = False,
 ) -> str:
-    heading = title or "ClusterFuzz local — fuzz findings"
+    info = parse_asan(log_text or log_excerpt)
+    source = comment_source()
+    if title:
+        heading = title
+    elif smoke_demo or any(is_demo_boom_crash(d) for _, d in crashes):
+        heading = "ClusterFuzz smoke (expected demo crash)"
+        smoke_demo = True
+    else:
+        heading = "ClusterFuzz local — fuzz findings"
+
     parts = [
         f"## {heading}",
         "",
-        f"Timed fuzz run on self-hosted runner for `{repo}` PR #{pr_number}.",
+        f"Timed fuzz via **{source}** for `{repo}` PR #{pr_number}.",
         "",
     ]
-    if not crashes:
+
+    if smoke_demo and crashes:
         parts += [
-            "No crash artifacts were collected in this run.",
+            "This matches the intentional `demo-target` / `BOOM` harness — "
+            "**not** treated as a new regression for unrelated PR changes.",
             "",
-            "<details><summary>Fuzzer log excerpt</summary>",
-            "",
-            "```",
-            truncate(log_excerpt, 2000) or "(empty)",
-            "```",
-            "",
-            "</details>",
         ]
-        if triage_md.strip():
-            parts += ["", triage_md.strip(), ""]
-        return "\n".join(parts)
 
-    parts.append(f"**{len(crashes)} crash artifact(s)** found.")
+    if not crashes:
+        # Skip / no-crash path: fuzz.log often holds the reason
+        reason = (log_text or log_excerpt or "").strip().splitlines()
+        lead = reason[0] if reason else "No crash artifacts were collected in this run."
+        parts += [lead, ""]
+        if len(reason) > 1:
+            parts += [
+                "<details><summary>Details</summary>",
+                "",
+                "```",
+                truncate("\n".join(reason), 2000),
+                "```",
+                "",
+                "</details>",
+                "",
+            ]
+        return "\n".join(parts).rstrip() + "\n"
+
+    # Lead with structured ASan signal
+    if info.bug_type:
+        parts.append(f"**{info.bug_type}** — {info.display_frame()}")
+    else:
+        parts.append(f"**{len(crashes)} crash artifact(s)** found.")
     parts.append("")
-    if ui_url:
-        parts.append(f"Local ClusterFuzz UI: {ui_url.rstrip('/')}")
-        parts.append("")
 
+    if info.summary:
+        parts.append(f"- SUMMARY: `{info.summary}`")
     for name, data in crashes:
-        parts.append(f"### `{name}`")
-        parts.append("")
-        parts.append(f"- Input: `{hex_preview(data)}`")
+        parts.append(f"- `{name}`: `{hex_preview(data)}`")
+    parts.append("")
+
+    if ui_url and not smoke_demo:
+        parts.append(
+            f"Local ClusterFuzz UI (reachable on the farm host only): `{ui_url.rstrip('/')}`"
+        )
         parts.append("")
 
-    if triage_md.strip():
-        parts += [triage_md.strip(), ""]
+    triage_body, is_llm = split_triage(triage_md)
+    if triage_body:
+        if is_llm and not smoke_demo:
+            label = triage_summary_label(triage_md)
+            parts += [
+                f"<details><summary>LLM triage ({label})</summary>",
+                "",
+                triage_body,
+                "",
+                "</details>",
+                "",
+            ]
+        else:
+            parts += [triage_body, ""]
 
-    if log_excerpt.strip():
+    if log_excerpt.strip() and not smoke_demo:
         parts += [
             "<details><summary>Fuzzer log excerpt</summary>",
             "",
@@ -183,10 +258,20 @@ def build_review_body(
             "</details>",
             "",
         ]
+    elif log_excerpt.strip() and smoke_demo:
+        parts += [
+            "<details><summary>ASan excerpt</summary>",
+            "",
+            "```",
+            truncate(log_excerpt, 1500),
+            "```",
+            "",
+            "</details>",
+            "",
+        ]
 
     parts.append(
-        "_Posted by `deploy/scripts/post_pr_comments.py` (custom glue — "
-        "ClusterFuzz does not natively comment on GitHub PRs)._"
+        f"_Posted by ClusterFuzz local glue ({source} — not upstream ClusterFuzz)._"
     )
     return "\n".join(parts)
 
@@ -195,7 +280,6 @@ def resolve_pr_number() -> str:
     explicit = env("PR_NUMBER") or env("PULL_REQUEST_NUMBER")
     if explicit:
         return explicit
-    # Actions: refs/pull/123/merge
     ref = env("GITHUB_REF", "") or ""
     if ref.startswith("refs/pull/") and "/merge" in ref:
         return ref.split("/")[2]
@@ -224,6 +308,7 @@ def main() -> int:
     ui_url = env("CLUSTERFUZZ_UI_URL") or "http://localhost:9300"
     max_crashes = int(env("COMMENT_MAX_CRASHES") or "10")
     dry_run = env("DRY_RUN") == "1"
+    smoke_demo = env("SMOKE_DEMO") in ("1", "true", "TRUE", "yes")
 
     crashes = collect_crashes(artifact_dir, max_crashes)
     log_path = artifact_dir / "fuzz.log"
@@ -236,7 +321,15 @@ def main() -> int:
     title = env("REVIEW_TITLE")
 
     body = build_review_body(
-        crashes, excerpt, ui_url, repo, pr_number, triage_md=triage_md, title=title
+        crashes,
+        excerpt,
+        log_text,
+        ui_url,
+        repo,
+        pr_number,
+        triage_md=triage_md,
+        title=title,
+        smoke_demo=smoke_demo,
     )
     payload = {"body": body, "event": "COMMENT"}
 

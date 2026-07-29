@@ -1,0 +1,29 @@
+# ClusterFuzz GitHub App webhook + PR fuzz worker (Sourcery-style).
+# Listens on 127.0.0.1:9310; expose via cloudflared → fuzzing.tetrazero.com
+# deploy/ is bind-mounted at runtime (:ro).
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    DEPLOY_DIR=/opt/clusterfuzz/deploy
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      clang \
+      llvm \
+      libclang-rt-18-dev \
+      zip \
+      unzip \
+      git \
+      ca-certificates \
+      curl \
+      python3 \
+      python3-venv \
+      python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir --break-system-packages 'PyJWT[crypto]>=2.8'
+
+WORKDIR /opt/clusterfuzz/deploy
+EXPOSE 9310
+CMD ["python3", "/opt/clusterfuzz/deploy/scripts/github_app_server.py"]
