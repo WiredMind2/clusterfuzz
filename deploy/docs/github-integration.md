@@ -126,4 +126,4 @@ Store registration secrets in the host environment or a gitignored `deploy/.env`
 - Do not point these workflows at GitHub-hosted runners and expect `local_gcs` ingest or the same sanitizer environment.
 - For org-wide use, prefer GitHub **runner groups** and explicit repository allow-lists (future / optional hardening).
 
-See also: [architecture.md](architecture.md) (data flow), [setup.md](setup.md) (registration steps), [limitations.md](limitations.md) (GitHub gaps).
+See also: [architecture.md](architecture.md) (data flow), [setup.md](setup.md) (registration steps), [multi-repo.md](multi-repo.md) (`cf_enable_repo.sh`), [limitations.md](limitations.md) (GitHub gaps).

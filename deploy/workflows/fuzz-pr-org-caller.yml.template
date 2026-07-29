@@ -1,0 +1,25 @@
+# Org-runner mode caller (only when RUNNER_SCOPE=org and a GitHub Organization exists).
+# Prefer fuzz-pr-caller.yml.template for WiredMind2 personal-account setups.
+
+name: ClusterFuzz PR fuzz
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  fuzz:
+    uses: WiredMind2/clusterfuzz/.github/workflows/fuzz-pr-reusable.yml@main
+    secrets:
+      CROSS_REPO_TOKEN: ${{ secrets.CLUSTERFUZZ_CROSS_REPO_TOKEN }}
+    with:
+      target_repository: ${{ github.repository }}
+      pr_number: ${{ github.event.pull_request.number }}
+      checkout_ref: ${{ github.event.pull_request.head.sha }}
+      fuzz_engine: ${{ vars.FUZZ_ENGINE || 'auto' }}
+      target_id: ${{ vars.TARGET_ID || github.event.repository.name }}
+      cross_repo: "0"

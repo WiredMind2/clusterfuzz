@@ -1,0 +1,29 @@
+# Central multi-repo entrypoint: other WiredMind2 repos dispatch here so a single
+# self-hosted runner (registered to this repo) can fuzz them.
+#
+# Event type: clusterfuzz-pr-fuzz
+# client_payload:
+#   repository, pr_number, sha, fuzz_engine?, target_id?
+
+name: ClusterFuzz remote PR fuzz
+
+on:
+  repository_dispatch:
+    types: [clusterfuzz-pr-fuzz]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  fuzz:
+    uses: ./.github/workflows/fuzz-pr-reusable.yml
+    secrets:
+      CROSS_REPO_TOKEN: ${{ secrets.CLUSTERFUZZ_CROSS_REPO_TOKEN }}
+    with:
+      target_repository: ${{ github.event.client_payload.repository }}
+      pr_number: ${{ github.event.client_payload.pr_number }}
+      checkout_ref: ${{ github.event.client_payload.sha }}
+      fuzz_engine: ${{ github.event.client_payload.fuzz_engine || '' }}
+      target_id: ${{ github.event.client_payload.target_id || '' }}
+      cross_repo: "1"

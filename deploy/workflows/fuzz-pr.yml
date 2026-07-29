@@ -1,20 +1,8 @@
-# Template: copy to .github/workflows/fuzz-pr.yml in a target repo.
-# Requires a self-hosted runner labeled: self-hosted, linux, clusterfuzz-local
+# Thin caller for target repos (personal-account / central-dispatch mode).
+# Copied by cf_enable_repo.sh → .github/workflows/fuzz-pr.yml
 #
-# Repo/org vars (optional):
-#   FUZZ_ENGINE        — atheris | libfuzzer (default: libfuzzer)
-#   FUZZ_SECONDS       — timed run budget (default: 60)
-#   CLUSTERFUZZ_UI_URL — e.g. http://127.0.0.1:9300
-#   TARGET_ID          — matches deploy/targets/<id>.yaml
-#   LOCAL_GCS_ROOT     — for libfuzzer ingest (default /data/local_gcs)
-#   ATHERIS_HARNESSES  — space-separated harness paths (atheris)
-#   SKIP_INGEST        — "1" to skip local_gcs ingest (recommended for atheris)
-#   LLM_FUZZ_ENABLED   — "1" to run Ollama seed/dict prep + triage (default: 1)
-#   LLM_FUZZ_MODEL     — Ollama model (default: Qwen2.5-Coder:1.5b)
-#   LLM_FUZZ_BASE_URL  — default http://127.0.0.1:11434
-#   LLM_FUZZ_BG_ENABLED — "1" to enqueue background deep-fuzz job (default: 1)
-#
-# Secrets: GITHUB_TOKEN is provided by Actions (needs pull-requests: write)
+# Requires repo secret CLUSTERFUZZ_DISPATCH_TOKEN (PAT with repo + workflow
+# on WiredMind2/clusterfuzz) — set automatically by cf_enable_repo.sh.
 
 name: ClusterFuzz PR fuzz
 
@@ -24,208 +12,26 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
-  fuzz:
-    runs-on: [self-hosted, clusterfuzz-local]
-    timeout-minutes: 30
-
-    env:
-      FUZZ_ENGINE: ${{ vars.FUZZ_ENGINE || 'libfuzzer' }}
-      FUZZ_SECONDS: ${{ vars.FUZZ_SECONDS || '60' }}
-      CLUSTERFUZZ_UI_URL: ${{ vars.CLUSTERFUZZ_UI_URL || 'http://127.0.0.1:9300' }}
-      TARGET_ID: ${{ vars.TARGET_ID || 'unknown' }}
-      LOCAL_GCS_ROOT: ${{ vars.LOCAL_GCS_ROOT || '/data/local_gcs' }}
-      ATHERIS_HARNESSES: ${{ vars.ATHERIS_HARNESSES || '' }}
-      SKIP_INGEST: ${{ vars.SKIP_INGEST || '' }}
-      ARTIFACT_DIR: ${{ github.workspace }}/fuzz-artifacts
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${{ vars.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://127.0.0.1:4318' }}
-      OTEL_SERVICE_NAME: clusterfuzz-pr-fuzz
-      LLM_FUZZ_ENABLED: ${{ vars.LLM_FUZZ_ENABLED || '1' }}
-      LLM_FUZZ_BASE_URL: ${{ vars.LLM_FUZZ_BASE_URL || 'http://127.0.0.1:11434' }}
-      LLM_FUZZ_MODEL: ${{ vars.LLM_FUZZ_MODEL || 'Qwen2.5-Coder:1.5b' }}
-      LLM_FUZZ_TIMEOUT_S: ${{ vars.LLM_FUZZ_TIMEOUT_S || '45' }}
-      LLM_FUZZ_BG_ENABLED: ${{ vars.LLM_FUZZ_BG_ENABLED || '1' }}
-      LLM_FUZZ_QUEUE_DIR: ${{ vars.LLM_FUZZ_QUEUE_DIR || '/data/llm_fuzz_queue' }}
-
+  dispatch:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Locate ClusterFuzz deploy glue
-        id: glue
+      - name: Dispatch to WiredMind2/clusterfuzz
+        env:
+          GH_TOKEN: ${{ secrets.CLUSTERFUZZ_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
-          for candidate in \
-              "${GITHUB_WORKSPACE}/deploy" \
-              "/opt/clusterfuzz/deploy" \
-              "/clusterfuzz/deploy"; do
-            if [[ -x "${candidate}/scripts/run_timed_fuzz.sh" ]] \
-               || [[ -x "${candidate}/scripts/run_timed_atheris.sh" ]]; then
-              echo "deploy=${candidate}" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done
-          echo "error: deploy/ scripts not found (mount deploy into the runner or vendor it)" >&2
-          exit 1
-
-      - name: Setup libFuzzer toolchain
-        if: env.FUZZ_ENGINE == 'libfuzzer'
-        run: |
-          set -euo pipefail
-          if ! command -v clang++ >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends clang llvm libclang-rt-18-dev zip python3 unzip
-          fi
-
-      - name: Build libFuzzer target
-        if: env.FUZZ_ENGINE == 'libfuzzer'
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          if [[ -x "${GITHUB_WORKSPACE}/deploy/demo-target/build.sh" ]]; then
-            "${GITHUB_WORKSPACE}/deploy/demo-target/build.sh" "${{ github.run_number }}"
-            echo "BINARY=${GITHUB_WORKSPACE}/deploy/demo-target/out/demo-fuzz" >> "$GITHUB_ENV"
-            echo "ZIP=$(ls -1 ${GITHUB_WORKSPACE}/deploy/demo-target/out/demo-fuzz-*.zip | tail -1)" >> "$GITHUB_ENV"
-            echo "SOURCE_PATHS=${GITHUB_WORKSPACE}/deploy/demo-target/demo_fuzz.cc" >> "$GITHUB_ENV"
-          elif [[ -x "${DEPLOY}/demo-target/build.sh" ]]; then
-            OUT_DIR="${GITHUB_WORKSPACE}/out" "${DEPLOY}/demo-target/build.sh" "${{ github.run_number }}"
-            echo "BINARY=${GITHUB_WORKSPACE}/out/demo-fuzz" >> "$GITHUB_ENV"
-            echo "ZIP=$(ls -1 ${GITHUB_WORKSPACE}/out/demo-fuzz-*.zip | tail -1)" >> "$GITHUB_ENV"
-            echo "SOURCE_PATHS=${DEPLOY}/demo-target/demo_fuzz.cc" >> "$GITHUB_ENV"
-          else
-            echo "error: no build.sh found — wire your project build here" >&2
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "error: CLUSTERFUZZ_DISPATCH_TOKEN secret missing — re-run cf_enable_repo.sh" >&2
             exit 1
           fi
-
-      - name: Setup Atheris
-        if: env.FUZZ_ENGINE == 'atheris'
-        run: |
-          set -euo pipefail
-          python3 -m venv "${GITHUB_WORKSPACE}/.venv-fuzz"
-          # shellcheck disable=SC1091
-          source "${GITHUB_WORKSPACE}/.venv-fuzz/bin/activate"
-          python -m pip install --upgrade pip
-          if [[ -f fuzz/requirements.txt ]]; then
-            python -m pip install -r fuzz/requirements.txt
-          else
-            python -m pip install atheris
-          fi
-          if [[ -f pyproject.toml ]] || [[ -f setup.py ]]; then
-            python -m pip install -e . || true
-          fi
-          echo "PYTHON=${GITHUB_WORKSPACE}/.venv-fuzz/bin/python" >> "$GITHUB_ENV"
-          echo "${GITHUB_WORKSPACE}/.venv-fuzz/bin" >> "$GITHUB_PATH"
-          if [[ -n "${ATHERIS_HARNESSES}" ]]; then
-            # shellcheck disable=SC2086
-            echo "SOURCE_PATHS=${ATHERIS_HARNESSES}" >> "$GITHUB_ENV"
-          else
-            mapfile -t H < <(find fuzz -maxdepth 1 -type f -name '*_fuzzer.py' | sort)
-            echo "SOURCE_PATHS=${H[*]}" >> "$GITHUB_ENV"
-          fi
-
-      - name: LLM prepare seeds and dictionary
-        if: env.LLM_FUZZ_ENABLED == '1'
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          mkdir -p "${ARTIFACT_DIR}"
-          # shellcheck disable=SC2086
-          python3 "${DEPLOY}/scripts/llm_fuzz_prepare.py" --github-env ${SOURCE_PATHS:-}
-
-      - name: Timed libFuzzer
-        if: env.FUZZ_ENGINE == 'libfuzzer'
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          "${DEPLOY}/scripts/run_timed_fuzz.sh" "${BINARY}" "${FUZZ_SECONDS}" "${ARTIFACT_DIR}"
-
-      - name: Ingest build into local_gcs
-        if: env.FUZZ_ENGINE == 'libfuzzer' && env.SKIP_INGEST != '1'
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          LOCAL_GCS_ROOT="${LOCAL_GCS_ROOT}" \
-            "${DEPLOY}/scripts/ingest_build.sh" "${ZIP}"
-
-      - name: Timed Atheris
-        if: env.FUZZ_ENGINE == 'atheris'
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          mkdir -p "${ARTIFACT_DIR}"
-          mapfile -t HARNESSES < <(
-            if [[ -n "${ATHERIS_HARNESSES}" ]]; then
-              # shellcheck disable=SC2086
-              printf '%s\n' ${ATHERIS_HARNESSES}
-            else
-              find fuzz -maxdepth 1 -type f -name '*_fuzzer.py' | sort
-            fi
-          )
-          if [[ ${#HARNESSES[@]} -eq 0 ]]; then
-            echo "error: no Atheris harnesses found (set ATHERIS_HARNESSES or add fuzz/*_fuzzer.py)" >&2
-            exit 1
-          fi
-          PER=$(( FUZZ_SECONDS / ${#HARNESSES[@]} ))
-          if [[ "${PER}" -lt 5 ]]; then PER=5; fi
-          export PYTHON="${PYTHON:-${GITHUB_WORKSPACE}/.venv-fuzz/bin/python}"
-          for h in "${HARNESSES[@]}"; do
-            echo "==> Harness ${h} (${PER}s)"
-            "${DEPLOY}/scripts/run_timed_atheris.sh" "${h}" "${PER}" "${ARTIFACT_DIR}"
-          done
-
-      - name: LLM crash triage
-        if: always() && env.LLM_FUZZ_ENABLED == '1'
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          python3 "${DEPLOY}/scripts/llm_crash_triage.py" || true
-
-      - name: Post PR review comments
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          ARTIFACT_DIR: ${{ env.ARTIFACT_DIR }}
-          CLUSTERFUZZ_UI_URL: ${{ env.CLUSTERFUZZ_UI_URL }}
-          FUZZ_ENGINE: ${{ env.FUZZ_ENGINE }}
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          python3 "${DEPLOY}/scripts/post_pr_comments.py"
-
-      - name: Enqueue background LLM deep-fuzz
-        if: always() && env.LLM_FUZZ_BG_ENABLED == '1'
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          python3 "${DEPLOY}/scripts/llm_fuzz_enqueue.py" || true
-
-      - name: Report OTLP (best-effort)
-        if: always()
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          ARTIFACT_DIR: ${{ env.ARTIFACT_DIR }}
-          FUZZ_ENGINE: ${{ env.FUZZ_ENGINE }}
-          FUZZ_SECONDS: ${{ env.FUZZ_SECONDS }}
-          TARGET_ID: ${{ env.TARGET_ID }}
-          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ env.OTEL_EXPORTER_OTLP_ENDPOINT }}
-          OTEL_SERVICE_NAME: ${{ env.OTEL_SERVICE_NAME }}
-        run: |
-          set -euo pipefail
-          DEPLOY="${{ steps.glue.outputs.deploy }}"
-          python3 "${DEPLOY}/scripts/report_fuzz_otel.py" || true
-
-      - name: Upload fuzz artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-artifacts-pr-${{ github.event.pull_request.number }}
-          path: ${{ env.ARTIFACT_DIR }}
-          if-no-files-found: ignore
+          gh api --method POST \
+            repos/WiredMind2/clusterfuzz/dispatches \
+            -f event_type='clusterfuzz-pr-fuzz' \
+            -f "client_payload[repository]=${{ github.repository }}" \
+            -f "client_payload[pr_number]=${{ github.event.pull_request.number }}" \
+            -f "client_payload[sha]=${{ github.event.pull_request.head.sha }}" \
+            -f "client_payload[fuzz_engine]=${{ vars.FUZZ_ENGINE || 'auto' }}" \
+            -f "client_payload[target_id]=${{ vars.TARGET_ID || github.event.repository.name }}"
+          echo "==> Dispatched clusterfuzz-pr-fuzz for ${{ github.repository }}#${{ github.event.pull_request.number }}"
