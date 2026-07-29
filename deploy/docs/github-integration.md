@@ -53,7 +53,7 @@ Continuous background fuzzing still happens in ClusterFuzz once `cf-server` / `c
 
 ## LLM-assisted seeds, triage, and background worker
 
-LLM assist is **glue only** (not upstream ClusterFuzz). Default LLM endpoint is **local Ollama** (`http://127.0.0.1:11434`, model `Qwen2.5-Coder:1.5b`).
+LLM assist is **glue only** (not upstream ClusterFuzz). Default LLM endpoint is **local Ollama** (`http://127.0.0.1:11434`, model `Qwen2.5-Coder:1.5b`). The `gha-runner` service uses `network_mode: host` so PR jobs can reach loopback Ollama (and OTLP).
 
 | Piece | Role |
 | --- | --- |
@@ -62,6 +62,8 @@ LLM assist is **glue only** (not upstream ClusterFuzz). Default LLM endpoint is 
 | `scripts/llm_fuzz_enqueue.py` | After the PR job, queue a deep job |
 | `scripts/llm_fuzz_worker.py` | Longer seed batch + timed fuzz; follow-up comment on **new** crash hashes |
 | `docker-compose.llm-worker.yml` | Optional Compose service for the worker |
+
+From the **gha-runner** / **llm-fuzz-worker** (both host-networked), Ollama is `http://127.0.0.1:11434`.
 
 ```bash
 cp llm-worker.env.example llm-worker.env   # optional GITHUB_TOKEN for follow-ups
