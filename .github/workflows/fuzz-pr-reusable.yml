@@ -24,7 +24,7 @@ on:
         required: false
         default: ""
       fuzz_engine:
-        description: atheris | libfuzzer (empty = vars / auto)
+        description: "atheris or libfuzzer (empty = vars / auto)"
         type: string
         required: false
         default: ""
@@ -34,7 +34,7 @@ on:
         required: false
         default: ""
       cross_repo:
-        description: "1" when fuzzing a repo other than WiredMind2/clusterfuzz
+        description: "Set to 1 for cross-repo dispatch runs"
         type: string
         required: false
         default: "0"
