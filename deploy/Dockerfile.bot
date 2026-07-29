@@ -1,0 +1,17 @@
+# Local (no-GCP) ClusterFuzz bot image.
+# Reuses the server image (same install_deps / pipenv tree); different CMD only.
+ARG SERVER_IMAGE=clusterfuzz-server:local
+FROM ${SERVER_IMAGE}
+
+ENV BOT_NAME=cf-bot
+
+# Upstream update_dir() uses shutil.copytree without dirs_exist_ok, so bot
+# container restarts fail once /data/bot is populated. Allow re-copy on restart.
+RUN sed -i \
+  's/shutil\.copytree(src_dir, dst_dir, copy_function=copy_if_newer)/shutil.copytree(src_dir, dst_dir, copy_function=copy_if_newer, dirs_exist_ok=True)/' \
+  /clusterfuzz/src/local/butler/common.py
+
+CMD ["pipenv", "run", "python", "butler.py", "run_bot", \
+     "--name", "cf-bot", \
+     "--server-storage-path", "/data", \
+     "/data/bot"]

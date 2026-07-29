@@ -1,0 +1,10 @@
+# Ignore bulky / irrelevant paths when building from repo root.
+.git
+**/__pycache__
+**/.venv
+data
+deploy/docs
+deploy/demo-target
+upstream/.git
+upstream/docs
+**/*.pyc

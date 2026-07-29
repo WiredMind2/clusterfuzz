@@ -1,0 +1,46 @@
+--- a/src/local/butler/constants.py
++++ b/src/local/butler/constants.py
+@@ -64,19 +64,19 @@
+ TEST_APP_ID_WITH_DEV_PREFIX = 'dev~' + TEST_APP_ID
+ 
+-DEV_APPSERVER_PORT = 9000
++DEV_APPSERVER_PORT = 9300
+ DEV_APPSERVER_HOST = 'localhost:' + str(DEV_APPSERVER_PORT)
+ 
+-CRON_SERVICE_PORT = 9009
++CRON_SERVICE_PORT = 9309
+ CRON_SERVICE_HOST = 'localhost:' + str(CRON_SERVICE_PORT)
+ 
+-DEV_APPSERVER_ADMIN_PORT = 9002
++DEV_APPSERVER_ADMIN_PORT = 9302
+ 
+-DATASTORE_EMULATOR_PORT = 9004
++DATASTORE_EMULATOR_PORT = 9304
+ DATASTORE_EMULATOR_HOST = 'localhost:' + str(DATASTORE_EMULATOR_PORT)
+ 
+-PUBSUB_EMULATOR_PORT = 9006
++PUBSUB_EMULATOR_PORT = 9306
+ PUBSUB_EMULATOR_HOST = 'localhost:' + str(PUBSUB_EMULATOR_PORT)
+ 
+-LOCAL_GCS_SERVER_PORT = 9008
++LOCAL_GCS_SERVER_PORT = 9308
+ LOCAL_GCS_SERVER_HOST = 'http://localhost:' + str(LOCAL_GCS_SERVER_PORT)
+--- a/src/local/butler/scripts/upload_fuzzer.py
++++ b/src/local/butler/scripts/upload_fuzzer.py
+@@ -23,7 +23,7 @@
+-_FUZZERS_ENDPOINT = 'http://localhost:9000/fuzzers'
++_FUZZERS_ENDPOINT = 'http://localhost:9300/fuzzers'
+--- a/local/emulators/gcs.go
++++ b/local/emulators/gcs.go
+@@ -249,7 +249,7 @@
+-	flag.IntVar(&port, "port", 9008, "Port to listen on.")
++	flag.IntVar(&port, "port", 9308, "Port to listen on.")
+--- a/src/local/butler/run_server.py
++++ b/src/local/butler/run_server.py
+@@ -160,7 +160,8 @@
+   local_gcs = common.execute_async(
+-      'go run emulators/gcs.go -storage-path=' + os.path.join(
++      'go run emulators/gcs.go -port=' + str(constants.LOCAL_GCS_SERVER_PORT) +
++      ' -storage-path=' + os.path.join(
+           os.path.abspath(args.storage_path), 'local_gcs'),
+       cwd='local')

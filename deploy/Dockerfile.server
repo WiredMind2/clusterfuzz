@@ -1,0 +1,84 @@
+# Local (no-GCP) ClusterFuzz server image.
+# Ubuntu 24.04 + Python 3.11 (deadsnakes) + Java 21; runs upstream local/install_deps.bash.
+# Build context: repository root (parent of deploy/ and upstream/).
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHON=python3.11 \
+    PIPENV_VENV_IN_PROJECT=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    LANG=C.UTF-8
+
+WORKDIR /clusterfuzz
+
+# Base OS tooling + runtimes. Ubuntu 24.04 defaults to 3.12; ClusterFuzz needs 3.11.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      wget \
+      gnupg \
+      lsb-release \
+      sudo \
+      git \
+      unzip \
+      xz-utils \
+      build-essential \
+      software-properties-common \
+      apt-transport-https \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      python3.11 \
+      python3.11-dev \
+      python3.11-venv \
+      openjdk-21-jdk-headless \
+      golang-go \
+      liblzma-dev \
+      patchelf \
+      blackbox \
+      xvfb \
+      nodejs \
+      npm \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py \
+    && python3.11 /tmp/get-pip.py --break-system-packages \
+    && python3.11 -m pip install --break-system-packages --upgrade pip pipenv \
+    && rm -f /tmp/get-pip.py \
+    && echo 'ALL ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Official ClusterFuzz sources (do not mix deploy/ glue into this tree).
+COPY upstream/ /clusterfuzz/
+
+# Remap local-mode ports off host :9000 (Tetrazero) onto free 9300–9309.
+# Patch lives under deploy/; upstream git checkout stays pristine.
+COPY deploy/scripts/apply_local_ports.sh /tmp/apply_local_ports.sh
+RUN chmod +x /tmp/apply_local_ports.sh && /tmp/apply_local_ports.sh /clusterfuzz \
+    && rm -f /tmp/apply_local_ports.sh
+
+# Adapt install_deps for container builds:
+# - Prefer OpenJDK 21 (datastore/pubsub emulators) over the script's JDK 17.
+# - Use docker.io from Ubuntu instead of docker-ce apt repo (daemon not needed here).
+RUN sed -i 's/openjdk-17-jdk/openjdk-21-jdk-headless/g' local/install_deps_linux.bash \
+    && sed -i 's/docker-ce/docker.io/g' local/install_deps_linux.bash \
+    && PYTHON=python3.11 bash local/install_deps.bash \
+    && rm -rf /root/.cache /tmp/* /var/lib/apt/lists/*
+
+ENV PATH="/clusterfuzz/.venv/bin:${PATH}" \
+    VIRTUAL_ENV="/clusterfuzz/.venv"
+
+# Re-apply port remap after install_deps so GCS Go default (:9008) and
+# run_server -port= are patched without invalidating the heavy deps layer
+# when only this script changes. (constants.py already remapped above.)
+COPY deploy/scripts/apply_local_ports.sh /tmp/apply_local_ports.sh
+RUN chmod +x /tmp/apply_local_ports.sh && /tmp/apply_local_ports.sh /clusterfuzz \
+    && rm -f /tmp/apply_local_ports.sh
+
+VOLUME ["/data"]
+
+EXPOSE 9300 9302 9304 9306 9308 9309
+
+# --skip-install-deps: deps baked at image build time.
+# --storage-path /data → buckets at /data/local_gcs (shared with cf-bot).
+CMD ["pipenv", "run", "python", "butler.py", "run_server", \
+     "--skip-install-deps", "--storage-path", "/data"]

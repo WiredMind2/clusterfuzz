@@ -1,0 +1,40 @@
+# Override / companion compose for the GitHub Actions self-hosted runner.
+# Use alongside the main stack without editing docker-compose.yml:
+#
+#   cp runner.env.example runner.env   # fill REPO_URL + token
+#   docker compose -f docker-compose.yml -f docker-compose.runner.yml --env-file runner.env up -d gha-runner
+#
+# Or runner-only:
+#   docker compose -f docker-compose.runner.yml --env-file runner.env up -d
+
+services:
+  gha-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    image: clusterfuzz-gha-runner:local
+    container_name: clusterfuzz-gha-runner
+    restart: unless-stopped
+    env_file:
+      - runner.env
+    environment:
+      # Labels must include clusterfuzz-local for fuzz-pr.yml
+      LABELS: ${LABELS:-self-hosted,linux,clusterfuzz-local}
+      RUNNER_NAME: ${RUNNER_NAME:-clusterfuzz-local-runner}
+      RUNNER_WORKDIR: /tmp/runner/work
+      RUNNER_SCOPE: ${RUNNER_SCOPE:-repo}
+      # Persist registration across restarts (only after first successful configure)
+      CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner/data
+      DISABLE_AUTO_UPDATE: "true"
+      DISABLE_AUTOMATIC_DEREGISTRATION: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Prefer deploy/data (shared with ingest_build.sh defaults); override if your
+      # main compose uses a repo-root data/ volume instead.
+      - ./data/runner:/runner/data
+      - ./data:/data
+      # Expose this deploy/ tree so workflows can find scripts on the runner
+      - .:/opt/clusterfuzz/deploy:ro
+      - /tmp/runner:/tmp/runner
+    # Do NOT set working_dir here — entrypoint runs ./config.sh from /actions-runner.
+    # Jobs use RUNNER_WORKDIR=/tmp/runner/work (host path must match for DinD).

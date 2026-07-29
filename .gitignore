@@ -1,0 +1,15 @@
+# Local runtime / secrets
+/data/
+/.cursor/
+/deploy/runner.env
+/deploy/runner.env.tmp
+/deploy/data
+
+# Official ClusterFuzz checkout lives on disk for builds (see UPSTREAM.md)
+/upstream/
+
+# Build artifacts / Python
+**/__pycache__/
+**/*.pyc
+**/.venv/
+*.egg-info/

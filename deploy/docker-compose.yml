@@ -1,0 +1,66 @@
+# Local ClusterFuzz stack (no GCP).
+# Usage (from deploy/):
+#   ./scripts/bootstrap.sh          # first-time build + bootstrap + up
+#   docker compose up -d            # normal start (after bootstrap)
+#   docker compose logs -f cf-server
+#
+# Data lives on the host at ../data (repo-root data/), mounted at /data.
+# Upstream butler uses --storage-path /data → filesystem GCS at /data/local_gcs.
+#
+# Host networking: local-mode emulators bind localhost; server + bot must share
+# the host network namespace so DATASTORE/PUBSUB/GCS emulator hosts resolve.
+
+services:
+  cf-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    image: clusterfuzz-server:local
+    container_name: clusterfuzz-cf-server
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - LOCAL_DEVELOPMENT=True
+      - PIPENV_VENV_IN_PROJECT=1
+    volumes:
+      # Shared storage root: local_gcs, datastore emulator files, etc.
+      - ../data:/data
+    # Override command for first-time bootstrap via:
+    #   docker compose run --rm cf-server pipenv run python butler.py run_server --bootstrap --skip-install-deps --storage-path /data
+    healthcheck:
+      # Local UI remapped to :9300 (see deploy/scripts/apply_local_ports.sh).
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9300/"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 180s
+
+  cf-bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.bot
+    image: clusterfuzz-bot:local
+    container_name: clusterfuzz-cf-bot
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      cf-server:
+        condition: service_healthy
+    environment:
+      - LOCAL_DEVELOPMENT=True
+      - BOT_NAME=cf-bot
+      - PIPENV_VENV_IN_PROJECT=1
+    volumes:
+      - ../data:/data
+
+  # Optional GitHub Actions self-hosted runner (secrets required).
+  # Prefer the companion file when registering:
+  #   cp runner.env.example runner.env   # fill REPO_URL + token
+  #   docker compose -f docker-compose.yml -f docker-compose.runner.yml --env-file runner.env up -d gha-runner
+  #
+  # Stub kept here so the service name exists in the main stack docs.
+  # gha-runner:
+  #   profiles: ["runner"]
+  #   extends:
+  #     file: docker-compose.runner.yml
+  #     service: gha-runner

@@ -1,0 +1,13 @@
+# Template for onboarding another repo to the local ClusterFuzz PR-fuzz farm.
+# Copy to deploy/targets/<id>.yaml, fill fields, then add .github/workflows/fuzz-pr.yml
+# in the target repo (see deploy/workflows/fuzz-pr.yml and docs/multi-repo.md).
+id: example-repo
+github: OWNER/REPO
+engine: libfuzzer # atheris | libfuzzer
+fuzz_seconds: 60
+harnesses:
+  # libfuzzer: path to binary after build, or build.sh that sets BINARY=
+  # atheris: list of harness .py files under the repo
+  - path/to/fuzz_target
+ui_url: http://127.0.0.1:9300
+notes: Replace with real target; prefer org-scoped runner when adding many repos

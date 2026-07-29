@@ -1,0 +1,15 @@
+# Snippet for TetrazeroDashboard services.yaml
+# Merge under `services:` then refresh the dashboard as usual.
+# Port 9300 assumes ClusterFuzz local UI remap (Tetrazero keeps :9000).
+
+  clusterfuzz:
+    label: ClusterFuzz (local)
+    path: /home/william/Documents/clusterfuzz/deploy
+    compose_files: [docker-compose.yml]
+    autostart: false
+    port: 9300
+    group: infrastructure
+    notes: >-
+      Host networking; UI on :9300. Optional gha-runner via
+      docker-compose.runner.yml + gitignored runner.env (PAT/registration token).
+      Heavy stack — start manually when needed. Depends on free 930x ports.

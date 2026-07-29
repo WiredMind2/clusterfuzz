@@ -1,0 +1,10 @@
+# First multi-repo PR-fuzz target (Python / Atheris pilot).
+id: animemanager
+github: WiredMind2/AnimeManager
+engine: atheris # atheris | libfuzzer
+fuzz_seconds: 60
+harnesses:
+  - fuzz/parse_pretty_line_fuzzer.py
+  - fuzz/is_safe_url_fuzzer.py
+ui_url: http://127.0.0.1:9300
+notes: Python pilot; skip local_gcs ingest
