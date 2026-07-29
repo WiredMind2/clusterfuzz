@@ -1,3 +1,4 @@
 # Never commit secrets
 runner.env
 runner.env.tmp
+llm-worker.env

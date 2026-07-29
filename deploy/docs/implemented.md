@@ -80,6 +80,11 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/scripts/run_timed_fuzz.sh` | Time-boxed libFuzzer run for PR path | **Present** |
 | `deploy/scripts/ingest_build.sh` | Drop builds/crashes into `local_gcs` | **Present** |
 | `deploy/scripts/post_pr_comments.py` | Crash artifacts → GitHub PR review comments | **Present** |
+| `deploy/scripts/llm_fuzz_prepare.py` | Ollama seeds + libFuzzer dict (fail-open) | **Present** |
+| `deploy/scripts/llm_crash_triage.py` | Ollama triage → `triage.md` | **Present** |
+| `deploy/scripts/llm_fuzz_enqueue.py` | Queue deep-fuzz job after PR run | **Present** |
+| `deploy/scripts/llm_fuzz_worker.py` | Background deep fuzz + follow-up comments | **Present** |
+| `deploy/docker-compose.llm-worker.yml` | Optional `llm-fuzz-worker` service | **Present** |
 
 ## GitHub workflow template
 

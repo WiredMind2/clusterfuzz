@@ -1,0 +1,13 @@
+# Self-test target for this deploy repo (demo libFuzzer).
+id: clusterfuzz-demo
+github: WiredMind2/clusterfuzz
+engine: libfuzzer
+fuzz_seconds: 60
+ui_url: http://127.0.0.1:9300
+notes: Uses deploy/demo-target; PR workflow in .github/workflows/fuzz-pr.yml
+llm:
+  enabled: true
+  model: Qwen2.5-Coder:1.5b
+  base_url: http://127.0.0.1:11434
+  background: true
+  bg_seconds: 600

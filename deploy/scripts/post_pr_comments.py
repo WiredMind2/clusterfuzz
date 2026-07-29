@@ -15,6 +15,7 @@ Optional env:
   CLUSTERFUZZ_UI_URL — base URL for local CF UI links (default: http://localhost:9300)
   GITHUB_API_URL — API base (default: https://api.github.com)
   COMMENT_MAX_CRASHES — max crash files to include (default: 10)
+  REVIEW_TITLE   — override review heading
   DRY_RUN        — if "1", print payload and exit without posting
 """
 
@@ -130,9 +131,12 @@ def build_review_body(
     ui_url: str,
     repo: str,
     pr_number: str,
+    triage_md: str = "",
+    title: str | None = None,
 ) -> str:
+    heading = title or "ClusterFuzz local — fuzz findings"
     parts = [
-        "## ClusterFuzz local — fuzz findings",
+        f"## {heading}",
         "",
         f"Timed fuzz run on self-hosted runner for `{repo}` PR #{pr_number}.",
         "",
@@ -149,6 +153,8 @@ def build_review_body(
             "",
             "</details>",
         ]
+        if triage_md.strip():
+            parts += ["", triage_md.strip(), ""]
         return "\n".join(parts)
 
     parts.append(f"**{len(crashes)} crash artifact(s)** found.")
@@ -162,6 +168,9 @@ def build_review_body(
         parts.append("")
         parts.append(f"- Input: `{hex_preview(data)}`")
         parts.append("")
+
+    if triage_md.strip():
+        parts += [triage_md.strip(), ""]
 
     if log_excerpt.strip():
         parts += [
@@ -220,8 +229,15 @@ def main() -> int:
     log_path = artifact_dir / "fuzz.log"
     log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
     excerpt = extract_asan_excerpt(log_text)
+    triage_path = artifact_dir / "triage.md"
+    triage_md = (
+        triage_path.read_text(encoding="utf-8", errors="replace") if triage_path.is_file() else ""
+    )
+    title = env("REVIEW_TITLE")
 
-    body = build_review_body(crashes, excerpt, ui_url, repo, pr_number)
+    body = build_review_body(
+        crashes, excerpt, ui_url, repo, pr_number, triage_md=triage_md, title=title
+    )
     payload = {"body": body, "event": "COMMENT"}
 
     url = f"{api}/repos/{repo}/pulls/{pr_number}/reviews"

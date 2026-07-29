@@ -42,11 +42,35 @@ Shipped stages in `fuzz-pr.yml`:
 2. **Checkout** — PR head.
 3. **Locate glue** — finds `deploy/scripts/run_timed_fuzz.sh` under the workspace, `/opt/clusterfuzz/deploy`, or `/clusterfuzz/deploy`.
 4. **Build** — default uses bundled `demo-target/build.sh`; replace for a real project.
-5. **Timed fuzz** — `run_timed_fuzz.sh` (`FUZZ_SECONDS`, default 60 via repo var).
-6. **Ingest** — `ingest_build.sh` into `LOCAL_GCS_ROOT` (default `/data/local_gcs`).
-7. **Comment** — `post_pr_comments.py` with `pull-requests: write` and optional `CLUSTERFUZZ_UI_URL`.
+5. **LLM prepare** (optional, `LLM_FUZZ_ENABLED=1`) — `llm_fuzz_prepare.py` calls local Ollama for seeds + `.dict`, sets `CORPUS_DIR` / `EXTRA_FUZZ_ARGS` (fail-open).
+6. **Timed fuzz** — `run_timed_fuzz.sh` / Atheris (`FUZZ_SECONDS`, default 60).
+7. **Ingest** — `ingest_build.sh` into `LOCAL_GCS_ROOT` (default `/data/local_gcs`).
+8. **LLM triage** — `llm_crash_triage.py` → `triage.md` appended by the commenter (fail-open).
+9. **Comment** — `post_pr_comments.py` with `pull-requests: write` and optional `CLUSTERFUZZ_UI_URL`.
+10. **Enqueue deep job** (`LLM_FUZZ_BG_ENABLED=1`) — JSON under `/data/llm_fuzz_queue` for the background worker.
 
 Continuous background fuzzing still happens in ClusterFuzz once `cf-server` / `cf-bot` are up; the workflow’s timed session exists so comments have a **synchronous, PR-scoped** result set.
+
+## LLM-assisted seeds, triage, and background worker
+
+LLM assist is **glue only** (not upstream ClusterFuzz). Default LLM endpoint is **local Ollama** (`http://127.0.0.1:11434`, model `Qwen2.5-Coder:1.5b`).
+
+| Piece | Role |
+| --- | --- |
+| `scripts/llm_fuzz_prepare.py` | Pre-fuzz seeds + libFuzzer `-dict=` |
+| `scripts/llm_crash_triage.py` | Short root-cause markdown for the PR review |
+| `scripts/llm_fuzz_enqueue.py` | After the PR job, queue a deep job |
+| `scripts/llm_fuzz_worker.py` | Longer seed batch + timed fuzz; follow-up comment on **new** crash hashes |
+| `docker-compose.llm-worker.yml` | Optional Compose service for the worker |
+
+```bash
+cp llm-worker.env.example llm-worker.env   # optional GITHUB_TOKEN for follow-ups
+docker compose -f docker-compose.yml -f docker-compose.llm-worker.yml up -d llm-fuzz-worker
+```
+
+Repo vars: `LLM_FUZZ_ENABLED`, `LLM_FUZZ_MODEL`, `LLM_FUZZ_BASE_URL`, `LLM_FUZZ_BG_ENABLED`. Prep/triage **fail open** if Ollama is down so classic mutation still runs.
+
+**Not** used: LLM inside the mutation hot loop (too slow for the 60s SLA).
 
 ## Review comment format and posting
 

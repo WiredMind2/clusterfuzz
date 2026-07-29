@@ -1,0 +1,37 @@
+# Optional background LLM-assisted deep-fuzz worker.
+# Requires host Ollama (default http://127.0.0.1:11434) and shared data/.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.llm-worker.yml up -d llm-fuzz-worker
+#
+# Optional: set GITHUB_TOKEN in llm-worker.env for follow-up PR comments.
+
+services:
+  llm-fuzz-worker:
+    image: python:3.12-slim-bookworm
+    container_name: clusterfuzz-llm-fuzz-worker
+    network_mode: host
+    restart: unless-stopped
+    working_dir: /opt/clusterfuzz/deploy
+    env_file:
+      - llm-worker.env
+    environment:
+      LLM_FUZZ_QUEUE_DIR: /data/llm_fuzz_queue
+      LLM_FUZZ_DEPLOY_DIR: /opt/clusterfuzz/deploy
+      LLM_FUZZ_BASE_URL: ${LLM_FUZZ_BASE_URL:-http://127.0.0.1:11434}
+      LLM_FUZZ_MODEL: ${LLM_FUZZ_MODEL:-Qwen2.5-Coder:1.5b}
+      LLM_FUZZ_BG_SECONDS: ${LLM_FUZZ_BG_SECONDS:-600}
+      LLM_FUZZ_BG_MAX_SEEDS: ${LLM_FUZZ_BG_MAX_SEEDS:-128}
+      LOCAL_GCS_ROOT: /data/local_gcs
+      # Lower priority vs cf-bot / interactive work
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../data:/data
+      - .:/opt/clusterfuzz/deploy:ro
+      # PR job binaries / artifacts often live under the runner workdir
+      - /tmp/runner:/tmp/runner
+    command:
+      - python3
+      - /opt/clusterfuzz/deploy/scripts/llm_fuzz_worker.py
+    # Soft CPU throttle via compose (Docker cpus)
+    cpus: 1.5
+    mem_limit: 2g
