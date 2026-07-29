@@ -81,13 +81,14 @@ No Firebase, App Engine, real GCS, or service-account JSON.
 | `deploy/scripts/ingest_build.sh` | Drop builds/crashes into `local_gcs` | **Present** |
 | `deploy/scripts/post_pr_comments.py` | Crash artifacts → GitHub PR review comments | **Present** |
 
-## GitHub workflow template
+## GitHub workflow and targets
 
 | Path | Role | Status |
 | --- | --- | --- |
+| `deploy/workflows/fuzz-pr.yml` | Template for other repos | **Present** |
+| `.github/workflows/fuzz-pr.yml` | In-repo PR fuzz workflow (libFuzzer default) | **Present** |
 | `deploy/targets/clusterfuzz.yaml` | Self-test / demo libFuzzer on this repo | **Present** |
 | `deploy/targets/animemanager.yaml` | Pilot: WiredMind2/AnimeManager (Atheris; deferred) | **Present** (not wired yet) |
-| `.github/workflows/fuzz-pr.yml` | In-repo PR fuzz workflow (libFuzzer default) | **Present** |
 
 ## Documentation
 
