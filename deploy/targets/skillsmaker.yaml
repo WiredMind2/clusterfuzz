@@ -1,0 +1,28 @@
+# Registered for the GitHub App path. Harness list matches chore/clusterfuzz-harness.
+id: skillsmaker
+github: Buddimm/SkillsMaker
+engine: atheris
+fuzz_seconds: 120
+harnesses:
+  - fuzz/article_urls_fuzzer.py
+  - fuzz/article_workspace_fuzzer.py
+  - fuzz/css_bdm_prefix_fuzzer.py
+  - fuzz/cursor_work_log_fuzzer.py
+  - fuzz/design_workspace_fuzzer.py
+  - fuzz/filtering_fuzzer.py
+  - fuzz/mission_structuration_workspace_fuzzer.py
+  - fuzz/outil_embed_workspace_fuzzer.py
+  - fuzz/parser_fuzzer.py
+  - fuzz/patterns_fuzzer.py
+  - fuzz/ticket_gate_fuzzer.py
+  - fuzz/webflow_asset_apply_fuzzer.py
+  - fuzz/webflow_asset_folders_fuzzer.py
+  - fuzz/webflow_asset_quality_fuzzer.py
+ui_url: http://127.0.0.1:9300
+notes: App-only PR path (GitHub App at fuzzing.tetrazero.com)
+llm:
+  enabled: true
+  provider: ollama
+  model: Qwen2.5-Coder:1.5b
+  base_url: http://127.0.0.1:11434
+  background: true
